@@ -1,0 +1,126 @@
+# UI design
+
+Decided 2026-10-27. The reference mockups are `docs/design/library.png` and `docs/design/reader.png`. The implementation should match them to the pixel where the mockups are specific, and follow the rules below where they are not.
+
+## Principles
+
+1. The library is the main view and opens first. Each PDF opens in a tab next to the Library tab in the same window, never in a separate window.
+2. The interface is elegant and quiet. Paper titles are set in a serif typeface, everything else in a sans-serif. There is one accent color, used only to mark selection, links, the primary button, and the active tab.
+3. Everything is placed on a 4 px grid, borders are exactly one physical pixel, text sits on consistent baselines, and icons are one size. Nothing is blurry, misaligned, or off by a pixel. Check every screen at 1x and 2x device scale.
+4. Nothing moves without a reason. Transitions are at most 150 ms and only for panels opening, tabs switching, and the selection toolbar appearing.
+
+## Layout
+
+The window is a three pane layout under a tab bar.
+
+```text
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ ● ● ●  Paper │ Library │ <PDF title> ✕ │ <PDF title> ✕ │ +                   │ 40 px tab bar
+├──────────────┬───────────────────────────────────────────┬───────────────────┤
+│ sidebar      │ center                                     │ detail panel      │
+│ 240 px       │ fills                                      │ 400 px, hideable  │
+│ min 200      │                                            │ min 320           │
+│              │                                            │                   │
+└──────────────┴───────────────────────────────────────────┴───────────────────┘
+```
+
+The tab bar spans the full width. The "Paper" label and the macOS traffic lights sit at the left of the tab bar on macOS. On Windows and Linux the tab bar also holds the window controls at the right, drawn by gpui-kit's title bar. The sidebar is shared by all tabs and can be collapsed with ⌘1. The detail panel belongs to the active tab and can be collapsed with ⌘3. Both dividers are draggable with the sizes remembered per library.
+
+### Sidebar
+
+Three groups with 11 px uppercase letter spaced labels: LIBRARY (All papers, Unread, Recently added, No PDF), COLLECTIONS (a tree with disclosure chevrons and folder icons, a "+" at the group label), and TAGS (color dot and name, a "+" at the group label). Rows are 36 px tall with 16 px left padding plus 24 px per nesting level. The selected row has the accent tint background and accent text. The bottom of the sidebar shows the library path in muted text with a switch icon that opens the library chooser.
+
+### Library tab
+
+A 52 px toolbar row holds a search field that fills the width and the primary button "Add DOI" at the right. The search field accepts a DOI, a doi.org URL, or an arXiv ID; when the text matches an identifier, pressing Enter adds the paper instead of searching, and the field shows an inline hint "Press Enter to add". Below the toolbar is a table with columns Title (serif, fills), Authors (first author et al.), Journal (short name), Year, Added, and PDF (icon or an outlined "No PDF" badge). Column headers are 11 px uppercase. Rows are 44 px tall with hairline dividers. A selected row has the accent tint. Double click or Enter opens the PDF in a tab. Sorting is by clicking a header, and the sort column shows a small chevron.
+
+### Detail panel
+
+The selected paper's title in 22 px serif, authors in 15 px sans, venue line "NeurIPS · 2020 · 33(1)" in muted sans, the DOI as an accent colored link with an external link icon, then a row of three buttons: "Open PDF" (primary), "Copy BibTeX", and "Cite". Below are collapsible sections with uppercase labels and hairline dividers: ABSTRACT, ATTACHMENTS (file rows with size), TAGS (chips plus a "+" chip), and NOTES (a quiet card that opens the note editor on click). A "⋯" menu at the top right holds Reveal in Finder, Find PDF again, Edit metadata, and Delete.
+
+### Reader tab
+
+The reader fills the center and the detail panel area of its tab.
+
+```text
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Title (serif 17)                 [3]/12  − 110% +  Fit width    🔍 ☰ Annotations│ 56 px toolbar
+│ Authors · Venue year (muted 12)                                               │
+├───────┬──────────────────────────────────────────────────────┬───────────────┤
+│ thumbs│ page canvas, warm gray, pages centered, 24 px gaps    │ ANNOTATIONS   │
+│ 112 px│                                                       │ OUTLINE NOTES │
+│       │                                                       │ 400 px        │
+│       │                                                       │               │
+│       │                                                       │ [Export PDF]  │
+└───────┴──────────────────────────────────────────────────────┴───────────────┘
+```
+
+The toolbar has the serif title with the author line under it at the left, the page field, zoom stepper, and "Fit width" toggle centered, and search, outline, and the "Annotations" toggle at the right. The thumbnail strip shows page images at 88 px wide with the page number under each and a 2 px accent outline on the current page; it can be hidden with ⌘2. The canvas background is warm gray, pages are white with a hairline border and no shadow, continuous vertical scrolling, zoom from 50% to 400% around the cursor with ⌘ and scroll or pinch, and ⌘0 for fit width.
+
+Selection and markup: dragging over text draws the selection in a translucent accent blue. Releasing shows a floating toolbar 8 px above the selection with five color dots (yellow, green, blue, pink, purple), highlight, underline, strikethrough, note, and a "Copy" text button. Clicking a color applies the last used markup kind in that color. Highlights are drawn with multiply blending so text stays sharp. A sticky note shows a 20 px icon in the margin and opens a small popover for the comment. The right panel tabs are ANNOTATIONS (cards in page order with a 3 px color bar, the quoted text, an italic comment, and the page number; clicking scrolls to it, and a card's comment can be edited inline), OUTLINE (the PDF outline tree), and NOTES (the Markdown note editor with a preview toggle). The "Export PDF with annotations" button sits at the bottom of the panel. Text search opens a bar under the toolbar with the match count and up and down buttons and highlights matches on the page.
+
+## Typography
+
+| Role | Font | Size and weight | Line height |
+|---|---|---|---|
+| Paper titles in table, tabs, and reader toolbar | Source Serif 4 | 15 px regular (table), 14 px (tabs), 17 px (reader toolbar) | 20 / 20 / 22 px |
+| Detail panel title | Source Serif 4 | 22 px semibold | 28 px |
+| Body and controls | Inter | 13 px regular, 13 px medium for buttons | 18 px |
+| Authors line in detail | Inter | 15 px regular | 20 px |
+| Section labels, column headers | Inter | 11 px medium, uppercase, letter spacing 0.06 em | 16 px |
+| Muted metadata | Inter | 12 px regular | 16 px |
+| Sidebar group labels | Inter | 11 px medium, uppercase | 16 px |
+
+Both fonts are bundled as assets under the SIL Open Font License and registered with GPUI's text system at startup, so rendering is identical on all three platforms. Numbers in tables use tabular figures. Text is never scaled fractionally; sizes are chosen so that at 1x and 2x the glyphs land on whole pixels.
+
+## Color
+
+Light theme is the default and the only theme in the MVP. A dark theme uses the same structure with inverted neutrals and is scheduled after 1.0.
+
+| Token | Value | Use |
+|---|---|---|
+| bg.canvas | #FBFAF7 | center background |
+| bg.sidebar | #F4F2EE | sidebar and thumbnail strip |
+| bg.panel | #FFFFFF | detail panel, cards, table rows |
+| bg.reader | #EFEDE8 | reader page canvas |
+| border | #E6E2DB | all hairlines |
+| text.primary | #1E1D1A | titles and body |
+| text.secondary | #5F5B54 | authors, metadata |
+| text.muted | #8E8A82 | labels, placeholders |
+| accent | #2F4A7A | selection text, links, primary button, active tab |
+| accent.tint | #E8EEF8 | selected row and selected sidebar item background |
+| selection | #2F4A7A at 22% | text selection on the page |
+| highlight.yellow | #FFE58A | |
+| highlight.green | #CFE8B8 | |
+| highlight.blue | #BFD9F2 | |
+| highlight.pink | #F7C6D0 | |
+| highlight.purple | #DCCBEE | |
+| danger | #B4473A | delete confirmations |
+
+## Spacing and shape
+
+The grid is 4 px. Horizontal padding is 16 px in every pane. Rows are 36 px in the sidebar and 44 px in the table. Buttons are 32 px tall with 12 px horizontal padding and 6 px radius. Inputs are 36 px tall. Cards and the note preview use 8 px radius. Chips are 24 px tall with 10 px padding and full radius. Icons are 16 px, stroke based, in text.secondary. Borders are 1 physical pixel, so at 2x scale the border width is 0.5 logical px. There are no drop shadows except under popovers and the floating selection toolbar, which use a 1 px border plus a soft 8 px shadow at 8% black.
+
+## States
+
+Every interactive element has hover (background 3% darker), pressed (6% darker), focused (2 px accent ring outside the element, visible only for keyboard focus), and disabled (50% opacity) states. Empty states have a short sentence in text.muted and one action, for example "No papers yet. Paste a DOI above to add one." Loading states use a thin 2 px accent progress line at the top of the row or panel that is loading, never a spinner over content. Errors appear as a toast at the bottom right with one line of text and a "Retry" action when retrying is possible.
+
+## Keyboard
+
+| Action | macOS | Windows and Linux |
+|---|---|---|
+| Add DOI or focus search | ⌘L | Ctrl+L |
+| Command palette | ⌘K | Ctrl+K |
+| Open selected paper | Enter | Enter |
+| Close tab | ⌘W | Ctrl+W |
+| Next and previous tab | ⌘⇧] and ⌘⇧[ | Ctrl+Tab and Ctrl+Shift+Tab |
+| Toggle sidebar, thumbnails, detail panel | ⌘1, ⌘2, ⌘3 | Ctrl+1, 2, 3 |
+| Find in document | ⌘F | Ctrl+F |
+| Highlight, underline, strikethrough selection | ⌘⇧H, ⌘⇧U, ⌘⇧S | Ctrl+Shift+H, U, S |
+| Add sticky note | ⌘⇧N | Ctrl+Shift+N |
+| Copy BibTeX, copy citation | ⌘⇧B, ⌘⇧C | Ctrl+Shift+B, C |
+| Zoom in, out, fit width | ⌘+, ⌘−, ⌘0 | Ctrl++, Ctrl+−, Ctrl+0 |
+
+## Implementation notes for GPUI
+
+Use gpui-kit components for the tab bar, tree, table, inputs, buttons, popovers, and the resizable panes, and restyle them through the theme to the tokens above rather than writing new widgets. Register the two font families from assets before opening the window. Define every size and color once in a `theme.rs` module as named constants and never write a literal pixel value or color in a view. Build each screen state (empty library, library with selection, reader with selection toolbar, annotations panel with an open comment) as a gpui-kit story so it can be screenshotted and compared with the mockups at 1x and 2x.
