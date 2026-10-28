@@ -28,6 +28,8 @@ enum Theme {
     }
 
     /// Source Serif 4 and Inter are not bundled yet, so these fall back to the system font.
+    /// `NSFont` is not `Sendable`, and `@MainActor` on `Theme` does not reach nested types.
+    @MainActor
     enum Font {
         static let title = NSFont(name: "Source Serif 4", size: 15) ?? .systemFont(ofSize: 15)
         static let body = NSFont(name: "Inter", size: 13) ?? .systemFont(ofSize: 13)
