@@ -17,3 +17,8 @@ futures-channel = "0.3"
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# Proc macros are host dylibs that rustc loads at build time. With Xcode 27,
+# stripping them leaves a misaligned LINKEDIT string pool and dlopen fails.
+[profile.release.build-override]
+strip = false
