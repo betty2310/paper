@@ -24,7 +24,7 @@ The window is a three pane layout under a tab bar.
 └──────────────┴───────────────────────────────────────────┴───────────────────┘
 ```
 
-The tab bar spans the full width. The "Paper" label and the macOS traffic lights sit at the left of the tab bar on macOS. On Windows and Linux the tab bar also holds the window controls at the right, drawn by gpui-kit's title bar. The sidebar is shared by all tabs and can be collapsed with ⌘1. The detail panel belongs to the active tab and can be collapsed with ⌘3. Both dividers are draggable with the sizes remembered per library.
+The tab bar spans the full width. The "Paper" label and the macOS traffic lights sit at the left of the tab bar on macOS, which hides the standard window title and uses full size content. The later Windows and Linux apps also hold their window controls at the right of the tab bar. The sidebar is shared by all tabs and can be collapsed with ⌘1. The detail panel belongs to the active tab and can be collapsed with ⌘3. Both dividers are draggable with the sizes remembered per library.
 
 ### Sidebar
 
@@ -71,7 +71,7 @@ Selection and markup: dragging over text draws the selection in a translucent ac
 | Muted metadata | Inter | 12 px regular | 16 px |
 | Sidebar group labels | Inter | 11 px medium, uppercase | 16 px |
 
-Both fonts are bundled as assets under the SIL Open Font License and registered with GPUI's text system at startup, so rendering is identical on all three platforms. Numbers in tables use tabular figures. Text is never scaled fractionally; sizes are chosen so that at 1x and 2x the glyphs land on whole pixels.
+Both fonts are bundled under the SIL Open Font License. On macOS they ship in the app bundle and are registered through `ATSApplicationFontsPath` in `Info.plist`, so the same files render on every platform. Numbers in tables use tabular figures. Text is never scaled fractionally; sizes are chosen so that at 1x and 2x the glyphs land on whole pixels.
 
 ## Color
 
@@ -121,6 +121,10 @@ Every interactive element has hover (background 3% darker), pressed (6% darker),
 | Copy BibTeX, copy citation | ⌘⇧B, ⌘⇧C | Ctrl+Shift+B, C |
 | Zoom in, out, fit width | ⌘+, ⌘−, ⌘0 | Ctrl++, Ctrl+−, Ctrl+0 |
 
-## Implementation notes for GPUI
+## Implementation notes for the macOS app
 
-Use gpui-kit components for the tab bar, tree, table, inputs, buttons, popovers, and the resizable panes, and restyle them through the theme to the tokens above rather than writing new widgets. Register the two font families from assets before opening the window. Define every size and color once in a `theme.rs` module as named constants and never write a literal pixel value or color in a view. Build each screen state (empty library, library with selection, reader with selection toolbar, annotations panel with an open comment) as a gpui-kit story so it can be screenshotted and compared with the mockups at 1x and 2x.
+AppKit owns the structure, and SwiftUI draws the leaf content. The tab bar is a custom `NSView` in the full size content area next to the traffic lights. The sidebar is an `NSOutlineView` with source list styling turned off and custom 36 px row views, so the tint, the group labels, and the indentation follow the tokens above rather than the system source list look. The library table is a view based `NSTableView` with 44 px rows, custom cell views, hairline grid lines drawn in the row view, and column headers restyled to 11 px uppercase. The reader is a `PDFView` with the warm gray background, page shadows off, and a hairline border drawn around each page by a page overlay view. The detail panel, the annotation cards, the outline, the note editor chrome, the empty states, the toasts, and the settings window are SwiftUI views hosted in `NSHostingView`, which is where SwiftUI is good on macOS 13 and where exact row heights do not matter.
+
+Define every size, color, font, and duration once in a `Theme.swift` enum as named constants (`Theme.Color.accent`, `Theme.Size.rowHeight`, `Theme.Font.title`) and never write a literal pixel value or color in a view. Colors are `NSColor` and SwiftUI `Color` pairs created from the same hex values, and the light values above are the only ones until the dark theme is decided (see the open questions in `docs/PRD.md`). Hairlines are drawn at one physical pixel using the window's `backingScaleFactor`, so they are 1 pt at 1x and 0.5 pt at 2x. Hover, pressed, focused, and disabled states are implemented in the custom cell and button views with the percentages above, and keyboard focus rings use `NSFocusRingType.exterior` tinted with the accent color.
+
+Build each screen state (empty library, library with selection, reader with selection toolbar, annotations panel with an open comment) as a case in the snapshot test target that loads a fixture library, so it can be rendered at 1x and 2x and compared with the mockups in `docs/design/` and later with the checked in reference images.

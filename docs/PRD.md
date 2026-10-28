@@ -4,7 +4,7 @@ Status: draft for discussion, 2026-10-27. The app is called Paper, bundle identi
 
 ## Summary
 
-Paper is a native desktop application for managing scientific papers. The user enters a DOI, and the app fetches the metadata, tries to download the open access PDF, and stores both in a local library. The user organizes papers into collections, reads the PDFs in a built-in viewer, highlights text, adds sticky notes, writes notes about each paper, and copies citations. Everything is stored on the user's machine. The app is written in Rust with the GPUI framework, and it runs on macOS, Windows, and Linux.
+Paper is a native desktop application for managing scientific papers. The user enters a DOI, and the app fetches the metadata, tries to download the open access PDF, and stores both in a local library. The user organizes papers into collections, reads the PDFs in a built-in viewer, highlights text, adds sticky notes, writes notes about each paper, and copies citations. Everything is stored on the user's machine. The logic is a Rust engine, and each platform gets a native app on top of it. Version 1.0 is the macOS app, built with AppKit, SwiftUI, and PDFKit. Windows and Linux apps follow after 1.0 on the same engine.
 
 ## Problem
 
@@ -78,7 +78,7 @@ From the item list or the viewer, the user can copy a BibTeX entry or a formatte
 | Annotations | Highlight, underline, strikethrough, sticky note, rectangle. Colors, comment text, created and modified times. Export to PDF copy. |
 | Notes | One Markdown note per item, autosaved. |
 | Citation | Copy BibTeX, copy APA, export .bib. |
-| Platforms | macOS 13+, Windows 10+ (x64), Linux with Vulkan (x64). Signed and notarized macOS build, signed Windows installer. |
+| Platforms | Version 1.0: macOS 13 and later on Apple silicon and Intel, signed, notarized, sandboxed, with Sparkle updates. After 1.0: Windows 10 and later, Linux. The engine builds and passes its tests on all three from the start. |
 | Offline | Everything except adding by DOI works offline. Adding a DOI offline queues the lookup. |
 
 ## Performance targets
@@ -103,6 +103,14 @@ The MVP is done when the author can move their own reading from Zotero to Paper 
 3. Zotero import ships in version 1.0 as the last milestone.
 4. UI: a three pane layout with the library as the main view and each PDF in a tab next to it, serif titles, one accent color, light theme first. The full specification and mockups are in `docs/UI.md` and `docs/design/`.
 
+## Decisions made on 2026-10-28
+
+1. Shape: a Rust engine with a native app per platform, called in process through UniFFI, instead of one GPUI app. The research is in `docs/research/native-ui-rust-core.md`.
+2. macOS first. Version 1.0 is the macOS app only, built with AppKit, SwiftUI for leaf content, and PDFKit for the reader. The goal is an app that is as good as a Mac app can be.
+3. Windows and Linux apps come after 1.0, reuse the engine unchanged, and use PDFium for rendering and text because Windows has no system text or annotation API.
+
 ## Open questions
 
-1. Primary development platform. GPUI is most mature on macOS. If the author's daily machine is Linux or Windows, we should test the GPUI window on that platform first.
+1. Dark Mode. `docs/UI.md` schedules the dark theme after 1.0, but Mac users expect a native app to follow the system appearance from day one. Decide before milestone 1 whether the dark tokens are part of 1.0.
+2. Distribution. Direct download with Sparkle is planned. If the Mac App Store is wanted too, the sandbox entitlements and the update path have to be settled before milestone 4.
+3. Minimum macOS version. 13 is the plan. Raising it to 14 would allow more SwiftUI and the newer `PDFView` behavior, at the cost of one year of Macs.

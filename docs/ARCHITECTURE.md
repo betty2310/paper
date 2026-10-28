@@ -1,41 +1,75 @@
 # Architecture
 
-## Workspace layout
+## Shape
 
-The repository is a Cargo workspace. Everything that is not UI lives in crates that do not depend on GPUI, so it can be unit tested with plain `cargo test` and reused by a future CLI or sync tool.
+Paper is a Rust engine with a native app on top of it per platform. The engine owns the library database, metadata lookup, PDF downloads, citations, and settings, and it exposes one API through `paper-engine`. The macOS app is a Swift application that calls the engine in process through UniFFI generated bindings and does everything visual with AppKit, SwiftUI, and PDFKit. Windows and Linux apps come after 1.0 and reuse the engine unchanged. See `docs/TECH_STACK.md` for why.
+
+## Repository layout
+
+The repository holds a Cargo workspace for the engine and an `apps/` directory with one native app per platform. Every crate under `crates/` can be unit tested with plain `cargo test` on any OS, and none of them depends on a UI toolkit.
 
 ```text
 paper/
-├── Cargo.toml                 workspace
+├── Cargo.toml                 workspace for the engine crates
 ├── crates/
 │   ├── paper-core/            domain types, SQLite storage, library service, settings
 │   ├── paper-ids/             DOI and arXiv parsing and normalization
 │   ├── paper-fetch/           Crossref, OpenAlex, Unpaywall, arXiv, PMC clients and the lookup pipeline
-│   ├── paper-pdf/             PDFium worker thread: render, text, search, outline, annotation export
 │   ├── paper-cite/            BibTeX and CSL output (hayagriva, biblatex)
-│   └── paper-app/             GPUI application: views, actions, keymaps, assets
+│   ├── paper-engine/          the public API: Engine, commands, view models, observer, threads
+│   ├── paper-ffi/             UniFFI exports of paper-engine, builds the static library
+│   └── paper-pdf/             PDFium worker for the later Windows and Linux apps, not built on macOS
+├── apps/
+│   └── macos/
+│       ├── Paper.xcodeproj
+│       ├── Paper/             Swift sources: AppKit windows and views, PDFKit reader, SwiftUI panels
+│       ├── PaperEngine/       Swift package: the XCFramework and the generated bindings
+│       ├── PaperTests/        XCTest unit and snapshot tests
+│       └── PaperUITests/      XCUITest flows
+├── scripts/                   build-xcframework.sh, generate-bindings.sh
 ├── docs/
 └── .github/workflows/
 ```
 
-Dependency direction is strictly `paper-app` → everything else, and `paper-core` depends on nothing else in the workspace. `paper-fetch` and `paper-pdf` return plain data types defined in `paper-core`.
+Dependency direction is strictly `paper-ffi` → `paper-engine` → (`paper-core`, `paper-ids`, `paper-fetch`, `paper-cite`), and `paper-core` depends on nothing else in the workspace. `paper-fetch` returns plain data types defined in `paper-core`. `paper-pdf` is behind a `pdfium` cargo feature of `paper-engine` that the macOS build leaves off. The Swift app depends only on the `PaperEngine` package and never opens the database, calls the network, or reads API responses itself.
 
 ```diagram
-┌─────────────────────────────────────────────────────────┐
-│ paper-app (GPUI)                                        │
-│  LibraryView  ReaderView  AnnotationPanel  NotePanel    │
-└───────┬───────────────┬───────────────┬─────────────────┘
-        │               │               │
-        ▼               ▼               ▼
-┌──────────────┐ ┌─────────────┐ ┌──────────────┐ ┌────────────┐
-│ paper-core   │ │ paper-pdf   │ │ paper-fetch  │ │ paper-cite │
-│ Library,     │ │ PdfWorker   │ │ Resolver     │ │ bibtex,    │
-│ SQLite, FTS  │ │ (one thread)│ │ pipeline     │ │ csl        │
-└──────────────┘ └─────────────┘ └──────────────┘ └────────────┘
-        ▲               ▲               ▲
-        └───────────────┴───────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ apps/macos (Swift)                                           │
+│  MainWindow  Sidebar  LibraryTable  Reader (PDFKit)  Panels  │
+└──────────────────────────────┬───────────────────────────────┘
+                               │ PaperEngine package (UniFFI)
+                               ▼
+┌──────────────────────────────────────────────────────────────┐
+│ paper-ffi → paper-engine                                     │
+│  Engine, commands, view models, EngineObserver, thread pool  │
+└───────┬──────────────────┬──────────────────┬────────────────┘
+        ▼                  ▼                  ▼
+┌──────────────┐  ┌──────────────┐  ┌────────────┐  ┌──────────────────┐
+│ paper-core   │  │ paper-fetch  │  │ paper-cite │  │ paper-pdf        │
+│ Library,     │  │ Resolver     │  │ bibtex,    │  │ PDFium worker,   │
+│ SQLite, FTS  │  │ pipeline     │  │ csl        │  │ Windows & Linux  │
+└──────────────┘  └──────────────┘  └────────────┘  └──────────────────┘
                    paper-ids (shared types live in paper-core)
 ```
+
+## Engine API
+
+`paper-engine` exposes one `Engine` object per open library. Its surface is small and typed so the generated Swift reads like a native SDK and so a Windows or Linux app can use it unchanged later.
+
+| Group | Methods | Notes |
+|---|---|---|
+| Library | `open_library(path)`, `create_library(path)`, `recent_libraries()`, `close()` | `Engine` is created by `open_library`. |
+| Items | `list_items(query, sort, scope) -> Vec<ItemRow>`, `item_detail(id) -> ItemDetail`, `add_by_identifier(text)`, `import_pdf(path)`, `update_metadata(id, fields)`, `delete_items(ids)`, `undo_delete()` | `query` runs through FTS5. `scope` is a collection, a tag, or one of the smart lists. |
+| Collections and tags | `collection_tree() -> Vec<CollectionNode>`, `create_collection`, `rename_collection`, `move_collection`, `add_to_collection`, `tags()`, `set_tags(id, names)` | |
+| Attachments | `attachment_file(id) -> AttachmentFile` (absolute path, page count, last page, last zoom), `set_reading_position(id, page, zoom)`, `attach_file(item_id, path)`, `find_pdf_again(item_id)` | |
+| Annotations | `annotations(attachment_id) -> Vec<Annotation>`, `create_annotation(New)`, `update_annotation(id, Patch)`, `delete_annotation(id)`, `import_embedded(attachment_id, Vec<New>)` | Geometry is in PDF user space, see below. |
+| Notes | `note(item_id)`, `save_note(item_id, markdown)` | Autosave calls `save_note` with a debounce in the app. |
+| Citations | `bibtex(ids) -> String`, `citation(ids, style) -> String`, `export_bib(ids, path)` | |
+| Settings | `settings()`, `update_settings(Patch)` | Contact email, OpenAlex key, window state, panel sizes. |
+| Events | `set_observer(Box<dyn EngineObserver>)` with `items_changed(ids)`, `collections_changed()`, `lookup_progress(item_id, LookupStage)`, `attachment_ready(item_id, attachment_id)`, `error(PaperError)` | A foreign trait the app implements. Called on engine threads. |
+
+Rules for the API. Reads that the UI needs on every keystroke or scroll, such as `list_items`, are synchronous and return in a few milliseconds from the database. Anything that touches the network or takes more than a few milliseconds is an `async fn` that completes a UniFFI future on the engine's thread pool. Records are plain data (`ItemRow`, `ItemDetail`, `CollectionNode`, `Annotation`, `AttachmentFile`), enums are closed sets (`ItemKind`, `AnnotationKind`, `LookupStage`, `SortColumn`), errors are one `PaperError` enum with a variant per subsystem, and no method returns a handle that the caller must keep alive except `Engine` itself. The app subscribes once with `set_observer`, so nothing in the engine ever calls back into the UI toolkit.
 
 ## Data on disk
 
@@ -50,7 +84,7 @@ The library directory is chosen on first launch. The chooser offers to create a 
 └── cache/              page thumbnails, extracted text; safe to delete
 ```
 
-Settings (recent libraries, window state, theme, contact email for API user agents, OpenAlex key) are stored separately in the platform config directory (`~/Library/Application Support/com.betty2310.paper` on macOS, `%APPDATA%\betty2310\paper` on Windows, `~/.config/paper` on Linux) as `settings.json`, so a library directory can be shared between machines without sharing machine settings.
+Settings (recent libraries, window state, theme, contact email for API user agents, OpenAlex key) are stored separately in the platform config directory (`~/Library/Application Support/com.betty2310.paper` on macOS, `%APPDATA%\betty2310\paper` on Windows, `~/.config/paper` on Linux) as `settings.json`, so a library directory can be shared between machines without sharing machine settings. The sandboxed macOS app also stores a security scoped bookmark for each recent library next to the settings, because the sandbox forgets folder access between launches otherwise.
 
 ## Database schema
 
@@ -154,27 +188,33 @@ The `items_fts` table is an external content index kept in sync by the library s
 
 ## Threading model
 
-GPUI runs the UI on the main thread and offers a background executor backed by a thread pool. Three kinds of work leave the main thread.
+The engine owns its threads, and the app owns the main thread. Nothing in the engine knows which thread the app calls from, and nothing in the app touches engine internals.
 
-1. PDFium work goes to one dedicated OS thread started at launch. PDFium is not thread safe, so the `PdfWorker` owns the `Pdfium` instance and all open documents, receives requests on a channel, and replies through oneshot channels wrapped as futures. Requests are `Open`, `Close`, `PageSizes`, `RenderPage { page, scale, tile }`, `PageText`, `Search`, `Outline`, `LinkAt`, and `ExportAnnotated`. Render requests carry a generation number so stale requests from a fast scroll are skipped.
-2. SQLite work runs in `cx.background_spawn` on a `Mutex<Connection>` owned by the `Library` service. Writes are short transactions. The main thread never holds the connection across an await.
-3. HTTP work runs in `cx.background_spawn` with the blocking `ureq` client. The resolver pipeline runs lookups for one item sequentially and several items concurrently, with a per host rate limiter (Crossref 10 per second, arXiv one per three seconds, others 5 per second).
+1. Synchronous engine reads (`list_items`, `item_detail`, `annotations`, `collection_tree`) run on the caller's thread against a `Mutex<Connection>`. They are called from the main thread and must return in a few milliseconds, which the 5,000 item target in `docs/PRD.md` holds at. Writes are short transactions on the same connection.
+2. Async engine work (lookups, downloads, imports, exports, Zotero import) runs on a small fixed thread pool inside the engine. UniFFI turns each `async fn` into a Swift `async` call. HTTP uses the blocking `ureq` client on these threads. The resolver pipeline runs the lookups for one item sequentially and several items concurrently, with a per host rate limiter (Crossref 10 per second, arXiv one per three seconds, others 5 per second).
+3. Events reach the app through `EngineObserver` on an engine thread. The app's `LibraryStore` forwards each call to the main thread before it touches any view.
+4. PDF work on macOS is PDFKit's. `PDFView` renders pages on its own background threads and the app never renders a page bitmap itself. Opening a `PDFDocument` and building the thumbnail strip happen on a utility queue, then the document is handed to the main thread.
 
 ```diagram
- main thread (GPUI)                background executor            pdf worker thread
-┌─────────────────────┐   spawn   ┌─────────────────────┐  chan  ┌──────────────────┐
-│ views, entities,    │──────────▶│ sqlite, http,       │       │ Pdfium instance   │
-│ cx.notify()         │◀──────────│ bitmap -> RenderImage│◀─────▶│ open docs, render │
-└─────────────────────┘  update   └─────────────────────┘        └──────────────────┘
+ main thread (AppKit)                engine thread pool             PDFKit
+┌─────────────────────┐  sync call  ┌─────────────────────┐   ┌──────────────────┐
+│ views, LibraryStore │────────────▶│ sqlite (mutex),     │   │ PDFView renders  │
+│                     │  async fn   │ ureq, pipeline      │   │ on its own       │
+│ (owns PDFView)      │◀────────────│ EngineObserver      │   │ threads          │
+└─────────────────────┘  hop to main└─────────────────────┘   └──────────────────┘
 ```
 
-## PDF viewer pipeline
+## PDF reader on macOS (PDFKit)
 
-A `ReaderView` entity holds an open `DocumentHandle`, the page sizes in points, the zoom, and a page cache. The page stack is a GPUI `list(ListState)` because pages have different heights. Each page element is a `canvas()` whose paint callback draws the cached bitmap with `paint_image`, then the annotation overlay with `paint_quad` (highlights use alpha, notes use a small icon, rectangles use a stroked quad), then the current selection.
+A `ReaderViewController` owns one `PDFView` in continuous single page mode with `autoScales` off, the zoom from the attachment's `last_zoom`, page shadows off, and the warm gray background from the theme. Opening works as follows. First, the app asks the engine for `attachment_file(id)`, which returns the absolute path inside the library folder, the last page, the last zoom, and the page count. Second, on a utility queue it creates `PDFDocument(url:)`, asks the engine for `annotations(attachment_id)`, and turns each row into a `PDFAnnotation` that it adds to the matching `PDFPage`. Third, on the main thread it assigns the document to the view and scrolls to the last page. Fourth, the thumbnail strip asks each page for `thumbnail(of:for:)` on the utility queue and caches the images by page index. The first page is visible as soon as PDFKit draws it, which is what the 300 ms target measures.
 
-Rendering a page works as follows. First, when a page becomes visible or within two pages of the viewport, the view asks the worker to render it at `zoom × window scale factor`, in BGRA because that is the format GPUI's `RenderImage` expects and PDFium can emit directly. Second, the worker returns the bytes, and a background task wraps them in an `image::Frame` and an `Arc<RenderImage>`. Third, the view stores the `Arc` in an LRU cache keyed by (page, zoom bucket) and calls `cx.notify()`. The same `Arc` is reused across frames so GPUI uploads the texture once, and `window.drop_image` is called on eviction. Above 200% zoom pages are rendered as 1024 px tiles so no bitmap exceeds the GPU texture limit and memory stays bounded. A quarter scale preview is rendered first and drawn scaled until the full bitmap arrives. The cache is capped at roughly 256 MB per window.
+The library file is never written. `PDFAnnotation` objects are added to the in memory `PDFDocument` only so that PDFKit draws them, and `PDFDocument.write(to:)` is called only on the "Export PDF with annotations" path, into a new file the user chooses. The reader keeps a dictionary from annotation id to `PDFAnnotation`, so an edit or delete from the annotations panel updates the page without reloading, and each `PDFAnnotation` created by Paper has `userName` set to `Paper` so embedded annotations that came with the file can be told apart. On open, annotations in the file that Paper did not create are listed read only in the panel with an "Import" action that calls `import_embedded`.
 
-Coordinates are kept in PDF user space (points, origin bottom left, unrotated) in the model. Conversion to screen pixels happens only in paint and hit testing using the page's crop box, rotation, zoom, and scale factor. Text selection asks the worker for the page's character boxes once per page and caches them. Dragging maps the mouse to character indexes, and the selected range is grouped into line rectangles that become the annotation quads.
+Coordinates in the database are PDF user space (points, origin bottom left, unrotated, inside the crop box). PDFKit page space is user space too, so a quad from the database becomes a `PDFAnnotation` with `bounds` set to the union rectangle and `quadrilateralPoints` set to each line rectangle expressed relative to `bounds`, which is the one conversion PDFKit needs because it stores quad points relative to the annotation bounds rather than absolute like PDF QuadPoints. Both directions of this conversion live in one Swift file (`AnnotationGeometry.swift`) with unit tests on rotated and odd crop box fixtures, and spike 2 of the roadmap confirms the crop box origin behavior before any annotation code is written.
+
+Selection and markup. `PDFView` handles drag selection and posts `PDFViewSelectionChanged`. On mouse up with a non empty selection, the reader calls `selection.selectionsByLine()`, takes `bounds(for: page)` of each line in page space, builds the quads, and shows the floating markup toolbar 8 px above the selection in view coordinates. Choosing a markup kind and color calls `create_annotation` with the quads, the selected string from `selection.string`, and 32 characters of context on each side taken from `page.string`, then adds the returned annotation to the page. A sticky note comes from a click with the note tool, converted with `pdfView.convert(point, to: page)`, and is stored as a 20 by 20 pt rectangle. A figure rectangle is drawn with a drag in the rectangle tool and stored as `rect` only. Search uses `PDFDocument.beginFindString` with the delegate callbacks feeding the search bar and `pdfView.highlightedSelections` for the matches. The outline comes from `document.outlineRoot`. Links are handled by `PDFView` itself. The current page is read from `PDFViewPageChanged` and written back with `set_reading_position` after a one second debounce.
+
+The PDFium reader for Windows and Linux (tiles, overlay painting, character boxes) is documented in `docs/research/pdf-engines.md` and will get its own section when those apps are planned. Both readers feed the same annotation table, which is why the geometry is defined in PDF user space and not in either engine's terms.
 
 ## Lookup pipeline
 
@@ -200,16 +240,18 @@ input ──▶ normalize (paper-ids) ──▶ Crossref /works/{doi}
 
 Each stage writes its raw response to `source_records` and emits a `LookupEvent` so the UI can show progress per item.
 
-## GPUI application structure
+## macOS application structure
 
-State is held in GPUI entities. `Entity<Library>` is created once in `application().run` and passed to views by handle. It wraps the storage service and emits `LibraryEvent::{ItemsChanged, CollectionsChanged, AttachmentReady, LookupProgress}` through `EventEmitter`. Views subscribe with `cx.subscribe` and keep the returned `Subscription` in their struct so it lives as long as the view.
+One `LibraryStore` object per open library wraps the `Engine`, implements `EngineObserver`, hops every event to the main thread, and publishes changes with Combine (`ObservableObject` with `@Published` snapshots of the item rows, the collection tree, and per item lookup state). AppKit controllers subscribe with Combine and SwiftUI panels observe it with `@ObservedObject`. The store is the only object in the app that holds an `Engine`, and it is created by `AppDelegate` when a library is opened and handed to the window controller.
 
-The window is one `Root` from gpui-kit containing a `Dock` layout. The left panel is `CollectionsPanel` (gpui-component `Tree`), the center is a tab area that holds either the `LibraryView` (gpui-component `Table` with virtual rows) or a `ReaderView` per open PDF, and the right panel holds `ItemDetailPanel`, `AnnotationsPanel`, and `NotePanel` as tabs.
+Each library opens one `MainWindowController`. Its window hides the standard title and uses full size content so the custom 40 px tab bar can sit next to the traffic lights. The content is an `NSSplitViewController` with three items: `SidebarViewController` (an `NSOutlineView` with the smart lists, the collection tree, and the tags), a `TabContainerViewController` that owns the tab bar and swaps between one `LibraryViewController` (an `NSTableView` with view based cells, 44 px rows, and the columns from `docs/UI.md`) and one `ReaderViewController` per open PDF, and a right `NSHostingController` that shows the SwiftUI `ItemDetailPanel` for the library tab or the `ReaderSidePanel` (annotations, outline, notes) for a reader tab. Divider positions are saved through `update_settings`.
 
-User commands are GPUI actions declared with the `actions!` macro (`AddByDoi`, `ImportFile`, `OpenItem`, `ToggleHighlight`, `FindInDocument`, `CopyBibtex`, `CopyCitation`, `ZoomIn`) and bound in a keymap JSON asset. Menus and toolbar buttons dispatch the same actions, so there is one code path per command.
+User commands are selectors on the responder chain (`addByIdentifier:`, `importFile:`, `openSelected:`, `highlightSelection:`, `findInDocument:`, `copyBibtex:`, `copyCitation:`, `zoomIn:`, and so on). The main menu is built in code with the key equivalents from `docs/UI.md`, and the toolbar buttons, the SwiftUI buttons (`NSApp.sendAction`), and the command palette all send the same selectors, so there is one code path per command and menu items enable and disable themselves through `validateMenuItem`.
 
-Error handling follows one rule. Library crates return `Result<T, PaperError>` with `thiserror` variants per subsystem. The app converts errors into a toast notification through gpui-component's notification API and logs them with `tracing`. Network failures during lookup leave the item in a `needs_lookup` state that a retry button clears.
+Error handling follows one rule. Engine crates return `Result<T, PaperError>` with `thiserror` variants per subsystem, flattened to one `PaperError` enum at the FFI, which UniFFI turns into a thrown Swift error. The app shows errors as a toast at the bottom right and logs them with `os.Logger`. Network failures during lookup leave the item in a `needs_lookup` state that a retry button clears.
 
 ## Testing
 
-`paper-core` tests run against an in-memory SQLite database. `paper-ids` has table driven tests for DOI and arXiv forms. `paper-fetch` tests parse recorded JSON fixtures from each API and never hit the network. `paper-pdf` tests render a small fixture PDF and check page count, text extraction, and that a highlight exported to a copy reads back with the same quads. UI behavior is covered by gpui-kit's headless window tests for the add flow and the reader's selection to highlight flow, and by manual checks on each platform before a release.
+`paper-core` tests run against an in-memory SQLite database. `paper-ids` has table driven tests for DOI and arXiv forms. `paper-fetch` tests parse recorded JSON fixtures from each API and never hit the network. `paper-engine` tests exercise the public API end to end on a temporary library folder with a fake HTTP layer, and they are the contract that the later Windows and Linux apps can rely on. `paper-pdf` tests run only with the `pdfium` feature on Linux and Windows CI.
+
+The macOS app has XCTest unit tests for `AnnotationGeometry` (database quads to `PDFAnnotation` and back on rotated and odd crop box fixtures), for `LibraryStore` (events arrive on the main thread and update the published snapshots), and for the identifier detection in the search field. Snapshot tests render each screen state (empty library, library with a selection, reader with the selection toolbar, annotations panel with an open comment) from a fixture library at 1x and 2x and compare them with reference images checked in next to the tests, with the mockups in `docs/design/` as the source for the references. XCUITest covers the add by DOI flow with a stubbed engine and the selection to highlight to export flow on a fixture PDF, and the exported copy is checked by reading its annotations back with PDFKit. Manual checks on each supported macOS version happen before a release, because PDFKit behavior changes between releases.

@@ -1,79 +1,99 @@
 # Technology decisions
 
-Each decision lists what we chose, why, and what we rejected. The detailed research behind these choices is in `docs/research/`. Dates and versions are as of 2026-10-27.
+Each decision lists what we chose, why, and what we rejected. The detailed research behind these choices is in `docs/research/`. Dates and versions are as of 2026-10-28.
 
-## 1. UI framework: GPUI via gpui-kit
+## 1. Shape: a Rust engine with a native UI per platform, macOS first
 
-Decision: depend on `gpui-kit = "=0.8.1"`, which pins and re-exports `gpui-pre 0.3.10` (Longbridge's weekly snapshot of Zed's GPUI) together with the `gpui-component` widget library.
+Decision: all logic lives in Rust crates that know nothing about any UI toolkit, exposed through one `paper-engine` crate. Each platform gets its own native UI that calls the engine in process. The first and only shell for 1.0 is the macOS app. Windows and Linux shells come after 1.0 and reuse the engine unchanged.
 
-Why: the official `gpui` crate on crates.io is 0.2.2 from October 2025 and still uses the old Linux renderer. Zed only publishes the core crate and has paused releases, so the current API is only reachable through a git dependency or a third party snapshot. Mixing two GPUI sources in one build fails with duplicate type errors, so every GPUI crate we use must come from one snapshot family. gpui-kit is the only family that ships a widget library (tables with virtual scrolling, trees, tabs, docks, inputs, menus, dialogs, Markdown rendering) built against an exact pin, and it is used in a shipping commercial app (Longbridge Pro). Upgrading becomes a single coordinated version bump.
+Why: the author wants the macOS app to be as good as a Mac app can be, which means AppKit windows, native menus, PDFKit, VoiceOver, Dark Mode, system fonts and scrolling, and an app that feels like Preview or Skim rather than like a port. A single cross platform Rust toolkit cannot give that on macOS without compromise, and the engine split makes the later shells cheaper because view models, search, metadata, storage, and citations already exist. The research in `docs/research/native-ui-rust-core.md` has the full comparison.
 
-Rejected: raw git dependency on zed main (weekly breaking changes, no widget library). `gpui-fast` (experimental, can be enabled later as a gpui-kit feature). `gpui-ce` (diverging API). Iced, egui, Slint, Tauri (the user chose GPUI, and GPUI is the only one of these with a text layout and rendering stack proven in a large editor).
+Rejected: GPUI through gpui-kit (one UI for all platforms, but weekly snapshot crates, slow clean builds, no native menu bar on Windows and Linux, incomplete screen reader support, and a custom look that cannot be pixel perfect on macOS; the research is in `docs/research/gpui.md`). A browser app (the built in PDF viewer has no API, and publisher PDF hosts do not send CORS headers, so downloads need a server). Tauri (one web UI in the system webview, but the author wants native controls). Out of process IPC between engine and UI (crash isolation is not needed for publisher PDFs, and it would cost a shared memory path per platform).
 
-Known costs: no native menu bar on Windows and Linux (gpui-kit draws its own). Linux needs a working Vulkan driver. Screen reader support is incomplete. Clean builds are slow. A hello world with `gpui-kit = "=0.8.1"` compiled from scratch in 5 minutes 50 seconds on a 4 core Linux machine (debug profile, dependencies at opt-level 1), with a 4.8 GB target directory. Documentation is API reference only. We should install the gpui-kit agent skills (`npx skills add longbridge/gpui-kit`) so coding sessions have the usage patterns at hand.
+## 2. macOS shell: AppKit with SwiftUI for leaf content
 
-## 2. PDF engine: PDFium through pdfium-render
+Decision: a Swift app built with Xcode, targeting macOS 13 and later. AppKit owns the window, the custom tab bar in the title bar area, the split view, the collections outline (`NSOutlineView`), the library table (`NSTableView`), the reader (`PDFView`), and the note editor (`NSTextView`). SwiftUI, hosted with `NSHostingView`, draws the detail panel, the annotation cards, the empty states, the toasts, and the settings window.
 
-Decision: `pdfium-render 0.9.x` binding to the prebuilt dynamic PDFium library from bblanchon/pdfium-binaries (pinned tag, shipped next to the executable). One dedicated worker thread owns all PDFium calls.
+Why: the mockups specify 36 px and 44 px rows, hairline dividers, bundled serif and sans fonts, and exact paddings. AppKit views give full control of row heights, cell layout, and drawing, and they are the fastest option for a 5,000 row table. SwiftUI on macOS 13 is good for static content with sections and chips, which is what the right hand panels are. PDFKit's `PDFView` is an AppKit view in any case.
 
-Why: PDFium is Chrome's engine, so it renders essentially every scientific PDF. The crate exposes everything the viewer needs today: page rendering to a bitmap, character bounding boxes and line rectangles for text selection, text search, links, outlines, and reading and creating highlight, underline, strikeout, square, text, and ink annotations. The license is BSD-3 for PDFium and MIT/Apache for the crate, so it works whether the app is open source or not. The prebuilt library is about 8 MB, has no C++ runtime dependency, needs no C toolchain at build time, and is rebuilt weekly for all six OS and architecture pairs.
+Rejected: SwiftUI for the whole app (list and table styling on macOS 13 fights the mockup, and performance of large lists is uneven). Mac Catalyst (an iPad app on the Mac, the opposite of the goal). Raising the minimum to macOS 14 for better SwiftUI (not needed yet; revisit when SwiftUI takes over more of the UI).
 
-Rejected: MuPDF (`mupdf-rs`). It is technically the best engine for writing annotations and has incremental save, but it is AGPL, which forces either an AGPL app or a commercial license from Artifex, and it compiles MuPDF from C source with bindgen on every clean build. hayro (pure Rust). Promising and fast, but read only, with no text selection, search, or link API, and the author warns about API churn and memory robustness. Re-evaluate in 2027. Poppler (GPL, needs GLib and cairo on Windows and macOS). Platform native PDFKit and Windows.Data.Pdf (two code paths, Windows has no text or annotation API).
+## 3. Bridge: UniFFI, in process, static library
 
-Known costs: PDFium is not thread safe, so rendering, text extraction, and search all go through one worker and a channel. pdfium-render cannot save incrementally, so export writes a new file rather than modifying the original. The macOS dylib must be code signed with the app. The crate's `pdfium_XXXX` feature must match the pinned binary tag.
+Decision: `uniffi 0.32` with proc macros in a `paper-ffi` crate that re-exports the `paper-engine` API as records, enums, objects, async functions, and one foreign trait (`EngineObserver`) that the Swift side implements for events. The engine builds as a `staticlib` for `aarch64-apple-darwin` and `x86_64-apple-darwin`, wrapped into an XCFramework and a Swift package with `cargo-swift` (or a short script around `xcodebuild -create-xcframework`). Callbacks arrive on engine threads, and the Swift side hops to the main thread.
 
-## 3. Annotation storage: database rows drawn as an overlay
+Why: UniFFI is the one bindings generator with years of production use on Apple platforms (Firefox, Element X), its Swift output is official, and proc macros keep the API definition next to the Rust code. A static library avoids a second dylib to sign and keeps the app a single Mach-O plus resources.
 
-Decision: annotations live in SQLite, keyed by item and page, with quads in PDF user space (points, origin bottom left). The viewer draws them on top of the rendered page. "Export PDF with annotations" writes real PDF annotation objects to a copy. Embedded annotations found in an imported PDF are shown read only and can be imported into the database.
+Rejected: BoltFFI (faster calls and nicer packaging, but ten months old; revisit when a Windows shell needs C#). swift-bridge (Swift only, would need a second tool later). Hand written C ABI (too much boilerplate for the whole API; still fine for one or two hot functions if a profile shows a need).
 
-Why: Zotero, Skim, sioyek, and ReadCube all converged on this model. It keeps the user's file untouched, makes undo and search across annotations trivial, produces small row level changes that a future sync can merge, and keeps the PDF engine's weaker write path off the critical path.
+## 4. PDF engine on macOS: PDFKit
 
-Rejected: writing into the PDF on every change (whole file rewrite per edit, conflict prone, risks corrupting the file).
+Decision: the macOS app renders, selects, searches, and navigates PDFs with PDFKit (`PDFDocument`, `PDFPage`, `PDFView`, `PDFSelection`, `PDFOutline`, `PDFAnnotation`). Annotations from the library database are added to the in memory `PDFDocument` as `PDFAnnotation` objects so PDFKit draws them, and the document is never written back to the library file. "Export PDF with annotations" writes a copy with `PDFDocument.write(to:)`. Thumbnails come from `PDFPage.thumbnail(of:for:)`.
 
-## 4. Database: SQLite via rusqlite
+Why: PDFKit is the system PDF engine on macOS, the same one Preview uses, and it is what Skim and Highlights are built on. It gives character geometry (`characterBounds(at:)`, `characterIndex(at:)`, `selectionsByLine()`), search, outline, links, annotation reading and writing, and page thumbnails, with no library to ship or sign, no worker thread, and rendering that is already tuned for Retina displays and smooth scrolling. The annotation table stores quads in PDF user space, so nothing in the database depends on PDFKit.
 
-Decision: `rusqlite` with the `bundled` feature (no system SQLite dependency) and FTS5 for full text search over titles, authors, abstracts, notes, and annotation text. Schema migrations are numbered SQL files applied at startup.
+Known costs: PDFKit bugs are Apple's and vary by macOS release, so the reader must be tested on each supported macOS version. `PDFAnnotation.quadrilateralPoints` are relative to the annotation's `bounds` rather than absolute like PDF QuadPoints, so the conversion is one place in the Swift code. Highlight appearance is PDFKit's, so the exact colors in `docs/UI.md` are set through `PDFAnnotation.color` and verified against the mockup.
 
-Why: single file, zero setup, fast enough for libraries of tens of thousands of items, and the file is the user's data. rusqlite is synchronous, which fits GPUI's background executor model without needing tokio.
+Rejected for macOS: PDFium through pdfium-render (kept for the later Windows and Linux shells, see `docs/research/pdf-engines.md`, because Windows has no system text or annotation API and poppler on Linux is GPL). MuPDF (AGPL). hayro (read only).
 
-Rejected: sqlx (async, needs tokio, compile time query checking is not worth the cost here). sled or redb (no SQL, no FTS).
+## 5. Annotation storage: database rows, PDF file untouched
 
-## 5. HTTP: ureq with rustls
+Decision: unchanged from the original plan. Annotations live in SQLite keyed by attachment and page with quads in PDF user space (points, origin bottom left, unrotated). The shell draws them through PDFKit on macOS and through an overlay on the later platforms. Export writes real PDF annotations to a copy. Embedded annotations in an imported PDF are read by the shell and offered for import into the database.
 
-Decision: `ureq 3` (blocking) with `rustls` and `rustls-native-certs`, called from GPUI background tasks. User agent `Paper/<version> (<repo url>; mailto:<contact>)`.
+Why: Zotero, Skim, sioyek, and ReadCube converged on this model. It keeps the user's file untouched, makes undo and library wide annotation search simple, and keeps the schema engine agnostic so PDFKit and PDFium can both feed it.
 
-Why: GPUI's executors are not tokio, and the `gpui_tokio` bridge is not published. A blocking client inside `background_spawn` is the simplest correct option, and the download volume is small (one metadata call and one PDF per added paper). rustls with native certificate roots avoids OpenSSL on Linux and respects corporate or campus proxies on Windows and macOS.
+## 6. Database: SQLite via rusqlite
 
-Rejected: reqwest (would require vendoring `gpui_tokio` and running a second runtime). Revisit if we need many parallel downloads with cancellation.
+Decision: `rusqlite` with the `bundled` feature and FTS5. Numbered SQL migrations applied at startup. The engine owns one connection behind a mutex and runs queries on its own thread pool.
 
-## 6. Metadata and PDF sources
+Why: single file, zero setup, fast enough for tens of thousands of items, and the file is the user's data. Synchronous rusqlite fits an engine that owns plain threads.
 
-Decision: Crossref REST (polite pool) is the primary metadata source. DOI content negotiation (CSL JSON) is the fallback for DataCite DOIs. OpenAlex (free API key, single DOI lookups cost nothing) supplies open access status and PDF links, with Unpaywall as a second source. arXiv and Europe PMC handle preprints and life science papers. Semantic Scholar is off by default because its license restricts commercial use. The app never scrapes publisher pages aggressively and never attempts to bypass paywalls.
+Rejected: sqlx (async, needs tokio). sled or redb (no SQL, no FTS). GRDB on the Swift side (would split the data layer between two languages and block the later shells).
 
-See `docs/research/doi-and-pdf-sources.md` for endpoints, rate limits, field mappings, and terms.
+## 7. HTTP: ureq with rustls
 
-## 7. Citations: hayagriva and biblatex
+Decision: `ureq 3` (blocking) with `rustls` and `rustls-native-certs`, run on the engine's thread pool. User agent `Paper/<version> (<repo url>; mailto:<contact>)`.
 
-Decision: `hayagriva` (CSL processor from the Typst project, bundles about 100 styles including APA) for formatted citations and `biblatex` for BibTeX generation and parsing.
+Why: one metadata call and one PDF per added paper is a small volume, and a blocking client on a worker thread is the simplest correct option. rustls with native roots respects corporate or campus proxies on macOS. The engine stays free of an async runtime, which keeps the FFI surface simple.
 
-Rejected: `citeproc-rs` (abandoned). Calling doi.org for BibTeX (works, but local generation is instant and works offline).
+Rejected: reqwest and tokio (a runtime inside a static library that Swift calls is more moving parts than the workload needs). `URLSession` on the Swift side (would move the lookup pipeline and polite usage rules out of the shared engine).
 
-## 8. Other crates
+## 8. Metadata and PDF sources
 
-| Need | Crate | Note |
+Decision: unchanged. Crossref REST (polite pool) is the primary metadata source. DOI content negotiation (CSL JSON) is the fallback for DataCite DOIs. OpenAlex supplies open access status and PDF links, with Unpaywall second. arXiv and Europe PMC handle preprints and life science papers. Semantic Scholar is off by default. The app never scrapes aggressively and never bypasses paywalls. See `docs/research/doi-and-pdf-sources.md`.
+
+## 9. Citations: hayagriva and biblatex
+
+Decision: `hayagriva` for formatted citations (about 100 bundled CSL styles including APA) and `biblatex` for BibTeX generation and parsing, both in the engine.
+
+Rejected: `citeproc-rs` (abandoned). Calling doi.org for BibTeX (local generation is instant and works offline).
+
+## 10. Other choices
+
+| Need | Engine (Rust) | macOS shell (Swift) |
 |---|---|---|
-| Errors | `thiserror` in library crates, `anyhow` in the app | |
-| Logging | `tracing`, `tracing-subscriber` | GPUI uses `log`; add `tracing-log` bridge |
-| Serialization | `serde`, `serde_json` | raw API responses, settings |
-| IDs | `uuid` v7 | time ordered, sync friendly |
-| Time | `jiff` or `time` | store UTC RFC 3339 strings in SQLite |
-| Paths | `directories` | platform data and config dirs |
-| Markdown | gpui-component's Markdown renderer | notes preview |
-| Clipboard | GPUI `cx.write_to_clipboard` | |
-| File dialogs | GPUI `prompt_for_paths` | native on all platforms |
+| Errors | `thiserror` per subsystem, flattened to one `PaperError` enum at the FFI | Swift `Error` from UniFFI, shown as a toast |
+| Logging | `tracing` with a subscriber that forwards to the shell | `os.Logger` with subsystem `com.betty2310.paper` |
+| Serialization | `serde`, `serde_json` for raw API responses and settings | not needed, UniFFI records |
+| IDs | `uuid` v7 | opaque strings |
+| Time | `jiff`, UTC RFC 3339 strings in SQLite | `Date` via UniFFI `Timestamp` |
+| Paths | `directories` for the settings location | `FileManager` and security scoped bookmarks for the library folder |
+| Markdown preview | `pulldown-cmark` to HTML if needed later | `AttributedString(markdown:)` in an `NSTextView` to start |
+| Clipboard | none | `NSPasteboard` |
+| File dialogs | none | `NSOpenPanel`, `NSSavePanel` |
+| Updates | none | Sparkle 2 |
+| Fonts | none | Source Serif 4 and Inter bundled, `ATSApplicationFontsPath` in Info.plist |
 
-## 9. Toolchain and build
+## 11. Toolchain and build
 
-Rust stable, edition 2024, MSRV tracking gpui-kit. `lld` on Linux and `mold` optional for faster links. In `Cargo.toml`, `[profile.dev.package."*"] opt-level = 1` so dependencies are usable in debug. Release profile with `lto = "thin"`, `codegen-units = 1`, `strip = true`. CI matrix on GitHub Actions for macos-latest, windows-latest, ubuntu-latest building the workspace and running tests, with a headless GPUI window test on Linux.
+Rust stable, edition 2024, MSRV tracking uniffi. Xcode 16 or later, Swift 6 language mode on (UniFFI's generated code is mostly `Sendable`; the async foreign trait path has an open issue, so `EngineObserver` is synchronous and the shell dispatches). Release profile with `lto = "thin"`, `codegen-units = 1`, `strip = true`.
 
-Packaging: bundle identifier `com.betty2310.paper`. macOS .app with the dylib in `Contents/Frameworks`, signed and notarized. Windows installer with Inno Setup or `cargo-wix`, `pdfium.dll` next to the exe, and an application manifest for DPI awareness. Linux AppImage or tarball with `libpdfium.so` next to the binary (the prebuilt library only needs glibc 2.16).
+Layout: a Cargo workspace at the repository root for the engine, and `apps/macos/` with the Xcode project, the Swift package that wraps the XCFramework, and the generated bindings (checked in, regenerated by a script, diffed in CI). The engine builds in about a minute from scratch; the app builds in Xcode in seconds after that.
+
+CI: GitHub Actions with `cargo test` for the workspace on macos-latest, ubuntu-latest, and windows-latest (the engine must stay portable), and an `xcodebuild test` job on macos-latest that builds the XCFramework, builds the app, runs the XCTest targets, and renders the screenshot fixtures at 1x and 2x.
+
+Packaging: bundle identifier `com.betty2310.paper`, App Sandbox on with a security scoped bookmark for the library folder, Hardened Runtime, `codesign --options runtime --timestamp`, `notarytool`, a DMG, and Sparkle appcast. No dylibs to ship on macOS.
+
+## 12. Later platforms
+
+Windows: WinUI 3 in C# with `uniffi-bindgen-cs`, or `windows-reactor` (Microsoft's WinUI 3 from Rust, preview) if it leaves preview; PDFium through pdfium-render in `paper-pdf` for rendering and text. Linux: GTK 4 with libadwaita in Rust, linking `paper-engine` directly; PDFium as on Windows. Both are after 1.0 and are not on the roadmap until the macOS app has shipped.
