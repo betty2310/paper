@@ -1,0 +1,14 @@
+[package]
+name = "uniffi-bindgen"
+description = "The UniFFI Swift bindings generator, pinned to the workspace's uniffi version."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "uniffi-bindgen-swift"
+path = "main.rs"
+
+[dependencies]
+uniffi = { workspace = true, features = ["cli"] }

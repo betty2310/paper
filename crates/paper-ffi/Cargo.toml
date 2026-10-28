@@ -1,0 +1,15 @@
+[package]
+name = "paper-ffi"
+description = "UniFFI exports of paper-engine. Builds the library that the Swift app links."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+# staticlib: linked into the macOS app through the XCFramework.
+# cdylib: read by uniffi-bindgen to generate bindings, and loadable on Linux.
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+paper-engine.workspace = true
+uniffi.workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "paper-engine"
+description = "The public API of the Paper engine. Knows nothing about FFI or any UI toolkit."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+futures-channel.workspace = true
+
+[dev-dependencies]
+pollster = "0.4"

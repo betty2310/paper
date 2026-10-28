@@ -1,0 +1,6 @@
+/target/
+.build/
+.swiftpm/
+/apps/macos/PaperEngine/PaperFFI.xcframework/
+.DS_Store
+.amp/portals/*

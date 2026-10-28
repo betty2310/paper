@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = ["crates/paper-engine", "crates/paper-ffi", "tools/uniffi-bindgen"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+paper-engine = { path = "crates/paper-engine" }
+uniffi = "0.32"
+thiserror = "2"
+futures-channel = "0.3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
