@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Prepares an Amp orb (Debian 12) for work on the Rust engine.
+# Runs on a fresh orb and again on stale snapshots, so every step is idempotent.
+# The macOS app cannot build here; it builds on the Mac runner.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+step() { echo "==> $1"; SECONDS=0; }
+done_step() { echo "    (${SECONDS}s)"; }
+
+step "Rust toolchain"
+if ! command -v rustup >/dev/null 2>&1 && [[ ! -x "$HOME/.cargo/bin/rustup" ]]; then
+  curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+fi
+# The installer cannot update this running script's environment.
+# shellcheck disable=SC1091
+source "$HOME/.cargo/env"
+rustup toolchain install stable --profile minimal --component rustfmt,clippy
+done_step
+
+step "Fetch crates"
+cargo fetch --locked
+done_step
+
+step "Warm build (tests, bindgen tool, FFI library)"
+cargo build --workspace --all-targets --locked
+done_step
+
+step "Orb notes for agents"
+notes="$HOME/.config/amp/AGENTS.md"
+marker="# Paper orb notes"
+mkdir -p "$(dirname "$notes")"
+if ! grep -Fqx "$marker" "$notes" 2>/dev/null; then
+  cat >> "$notes" <<'EOF'
+
+# Paper orb notes
+
+- This orb is Linux. `cargo test --workspace` and `scripts/generate-bindings.sh` work here; the AppKit app and `scripts/build-xcframework.sh` need macOS.
+- Build and run the macOS app on the Mac runner `meowwww-amp-app` in `/Users/betty/Developer/paper`.
+EOF
+fi
+done_step
