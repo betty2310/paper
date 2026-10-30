@@ -1,0 +1,21 @@
+[package]
+name = "paper-fetch"
+description = "Metadata lookup: Crossref, DOI content negotiation, and the resolver pipeline. Returns paper-core types."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# A scripted HTTP client for tests in other crates.
+testing = []
+
+[dependencies]
+paper-core.workspace = true
+paper-ids.workspace = true
+thiserror.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+ureq.workspace = true
+
+[[example]]
+name = "lookup"

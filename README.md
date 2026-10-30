@@ -2,7 +2,7 @@
 
 A native, local first desktop app for managing scientific papers. The logic is a Rust engine, and each platform gets a native app on top of it. Version 1.0 is the macOS app (AppKit, SwiftUI, PDFKit); Windows and Linux follow on the same engine. Enter a DOI, get the metadata and the open access PDF, organize papers into collections, read and annotate PDFs in a built in viewer, write notes, and copy citations.
 
-Status: spike 1 of the [roadmap](docs/ROADMAP.md). A minimal engine and macOS app that talk through UniFFI. The engine keeps 5,000 generated items in memory and fakes the DOI lookup; SQLite and the real metadata sources come in milestone 1.
+Status: milestone 1 of the [roadmap](docs/ROADMAP.md), engine side. The Rust engine stores the library in SQLite (items, creators, collections, tags, notes, full text search), looks metadata up from Crossref with doi.org content negotiation as the fallback, supports delete and undo, and exposes it all through UniFFI. The macOS app is still the spike 1 window on top of the new engine; the sidebar, detail panel, and menus of milestone 1 are next.
 
 ## Run the demo on macOS
 

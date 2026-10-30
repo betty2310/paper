@@ -16,9 +16,11 @@ final class LibraryStore {
     var onItemsChanged: (() -> Void)?
 
     init(libraryPath: String) throws {
-        engine = try Engine.openLibrary(path: libraryPath)
-        items = engine.listItems(query: "")
-        engine.setObserver(observer: ObserverBridge { [weak self] _ in
+        engine = try isLibrary(path: libraryPath)
+            ? Engine.openLibrary(path: libraryPath)
+            : Engine.createLibrary(path: libraryPath)
+        items = try engine.listItems(query: Self.query(""))
+        engine.setObserver(observer: ObserverBridge { [weak self] in
             Task { @MainActor in self?.reload() }
         })
     }
@@ -38,21 +40,34 @@ final class LibraryStore {
     }
 
     private func reload() {
-        items = engine.listItems(query: query)
+        items = (try? engine.listItems(query: Self.query(query))) ?? []
         onItemsChanged?()
+    }
+
+    /// The whole library, newest first, filtered by `text`.
+    private static func query(_ text: String) -> ItemQuery {
+        ItemQuery(text: text, scope: .all, sort: .added, ascending: false)
     }
 }
 
 /// Implements the engine's observer protocol. Its methods run on engine threads,
 /// so it only forwards to a closure that hops to the main actor.
 private final class ObserverBridge: EngineObserver {
-    private let forward: @Sendable ([String]) -> Void
+    private let forward: @Sendable () -> Void
 
-    init(forward: @escaping @Sendable ([String]) -> Void) {
+    init(forward: @escaping @Sendable () -> Void) {
         self.forward = forward
     }
 
     func itemsChanged(ids: [String]) {
-        forward(ids)
+        forward()
+    }
+
+    func collectionsChanged() {}
+
+    func tagsChanged() {}
+
+    func lookupProgress(itemId: String, status: LookupStatus) {
+        forward()
     }
 }

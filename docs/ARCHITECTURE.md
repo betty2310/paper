@@ -60,16 +60,16 @@ Dependency direction is strictly `paper-ffi` → `paper-engine` → (`paper-core
 | Group | Methods | Notes |
 |---|---|---|
 | Library | `open_library(path)`, `create_library(path)`, `recent_libraries()`, `close()` | `Engine` is created by `open_library`. |
-| Items | `list_items(query, sort, scope) -> Vec<ItemRow>`, `item_detail(id) -> ItemDetail`, `add_by_identifier(text)`, `import_pdf(path)`, `update_metadata(id, fields)`, `delete_items(ids)`, `undo_delete()` | `query` runs through FTS5. `scope` is a collection, a tag, or one of the smart lists. |
+| Items | `list_items(ItemQuery) -> Vec<ItemRow>`, `item_detail(id) -> ItemDetail`, `add_by_identifier(text)`, `retry_lookup(id)`, `import_pdf(path)`, `update_metadata(id, MetadataPatch)`, `delete_items(ids)`, `undo_delete()` | `ItemQuery` is text, scope, sort column, and direction; the text runs through FTS5. `scope` is a collection, a tag, or one of the smart lists. `add_by_identifier` inserts a `Pending` placeholder row at once, then fills it in from the lookup; a failed lookup leaves the row `Failed` for `retry_lookup`. |
 | Collections and tags | `collection_tree() -> Vec<CollectionNode>`, `create_collection`, `rename_collection`, `move_collection`, `add_to_collection`, `tags()`, `set_tags(id, names)` | |
 | Attachments | `attachment_file(id) -> AttachmentFile` (absolute path, page count, last page, last zoom), `set_reading_position(id, page, zoom)`, `attach_file(item_id, path)`, `find_pdf_again(item_id)` | |
 | Annotations | `annotations(attachment_id) -> Vec<Annotation>`, `create_annotation(New)`, `update_annotation(id, Patch)`, `delete_annotation(id)`, `import_embedded(attachment_id, Vec<New>)` | Geometry is in PDF user space, see below. |
 | Notes | `note(item_id)`, `save_note(item_id, markdown)` | Autosave calls `save_note` with a debounce in the app. |
 | Citations | `bibtex(ids) -> String`, `citation(ids, style) -> String`, `export_bib(ids, path)` | |
 | Settings | `settings()`, `update_settings(Patch)` | Contact email, OpenAlex key, window state, panel sizes. |
-| Events | `set_observer(Box<dyn EngineObserver>)` with `items_changed(ids)`, `collections_changed()`, `lookup_progress(item_id, LookupStage)`, `attachment_ready(item_id, attachment_id)`, `error(PaperError)` | A foreign trait the app implements. Called on engine threads. |
+| Events | `set_observer(Arc<dyn EngineObserver>)` with `items_changed(ids)`, `collections_changed()`, `tags_changed()`, `lookup_progress(item_id, LookupStatus)`, `attachment_ready(item_id, attachment_id)` | A foreign trait the app implements. Called on engine threads. Errors are not events: every `async fn` returns its own `PaperError`, and lookup errors carry the id of the row they left behind. |
 
-Rules for the API. Reads that the UI needs on every keystroke or scroll, such as `list_items`, are synchronous and return in a few milliseconds from the database. Anything that touches the network or takes more than a few milliseconds is an `async fn` that completes a UniFFI future on the engine's thread pool. Records are plain data (`ItemRow`, `ItemDetail`, `CollectionNode`, `Annotation`, `AttachmentFile`), enums are closed sets (`ItemKind`, `AnnotationKind`, `LookupStage`, `SortColumn`), errors are one `PaperError` enum with a variant per subsystem, and no method returns a handle that the caller must keep alive except `Engine` itself. The app subscribes once with `set_observer`, so nothing in the engine ever calls back into the UI toolkit.
+Rules for the API. Reads that the UI needs on every keystroke or scroll, such as `list_items`, are synchronous and return in a few milliseconds from the database. Anything that touches the network or takes more than a few milliseconds is an `async fn` that completes a UniFFI future on the engine's thread pool. Records are plain data (`ItemRow`, `ItemDetail`, `CollectionNode`, `Annotation`, `AttachmentFile`), enums are closed sets (`ItemKind`, `AnnotationKind`, `LookupStatus`, `SortColumn`), errors are one `PaperError` enum with a variant per subsystem, and no method returns a handle that the caller must keep alive except `Engine` itself. The app subscribes once with `set_observer`, so nothing in the engine ever calls back into the UI toolkit.
 
 ## Data on disk
 
@@ -94,7 +94,7 @@ All primary keys are UUID v7 strings. Every table has `created_at` and `modified
 CREATE TABLE items (
   id TEXT PRIMARY KEY,
   kind TEXT NOT NULL,              -- journal_article | conference_paper | preprint | other
-  doi TEXT UNIQUE,                 -- lowercase, no prefix
+  doi TEXT,                        -- lowercase, no prefix; unique among live rows (partial index)
   arxiv_id TEXT,
   title TEXT NOT NULL,
   container_title TEXT,            -- journal or proceedings
@@ -110,9 +110,11 @@ CREATE TABLE items (
   oa_status TEXT,                  -- gold | hybrid | green | bronze | closed | unknown
   cited_by_count INTEGER,
   citation_key TEXT UNIQUE,
+  lookup_status TEXT NOT NULL,     -- pending | done | failed
   extra TEXT,                      -- JSON for fields with no column yet
   created_at TEXT NOT NULL, modified_at TEXT NOT NULL, deleted_at TEXT
 );
+CREATE UNIQUE INDEX items_live_doi ON items(doi) WHERE deleted_at IS NULL AND doi IS NOT NULL;
 
 CREATE TABLE creators (
   id TEXT PRIMARY KEY,

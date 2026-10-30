@@ -125,9 +125,11 @@ final class LibraryViewController: NSViewController, NSTableViewDataSource, NSTa
     /// UniFFI keeps the Rust variant names, which is why the cases are capitalized.
     private static func message(for error: Error) -> String {
         switch error as? PaperError {
-        case .InvalidIdentifier(let text): "Not a DOI: \(text)"
-        case .Duplicate(let doi): "Already in the library: \(doi)"
-        case .Io(let message): "Could not open the library: \(message)"
+        case .InvalidIdentifier(let text): "Not a DOI or arXiv ID: \(text)"
+        case .Duplicate(let doi, _): "Already in the library: \(doi)"
+        case .MetadataNotFound(let doi, _): "No metadata found for \(doi)"
+        case .Lookup(let doi, _, let message): "Could not look up \(doi): \(message)"
+        case .some(let other): String(describing: other)
         case nil: error.localizedDescription
         }
     }
