@@ -24,15 +24,22 @@ pub use paper_fetch::HttpClient;
 use paper_fetch::{Contact, FetchError, Resolver, UreqClient};
 pub use paper_ids::Identifier;
 
-use crate::pool::ThreadPool;
+use crate::pool::{PoolError, ThreadPool};
 
 /// Threads for lookups and downloads.
 const POOL_SIZE: usize = 4;
+/// How many `delete_items` batches `undo_delete` remembers.
+const MAX_UNDO_BATCHES: usize = 100;
 
 type Result<T> = std::result::Result<T, PaperError>;
 
-/// Events from the engine. Called on engine threads, never on the caller's
-/// thread, so an app must move to its UI thread before touching a view.
+type SharedObserver = Arc<Mutex<Option<Arc<dyn EngineObserver>>>>;
+
+/// Events from the engine. An event caused by a synchronous call arrives on
+/// the caller's thread before that call returns; everything a lookup does
+/// after it leaves for the network arrives on an engine thread. An app must
+/// therefore hop to its UI thread asynchronously (never with a blocking
+/// dispatch) before touching a view.
 pub trait EngineObserver: Send + Sync {
     /// These items were added, changed, deleted, or restored. Reload the rows.
     fn items_changed(&self, ids: Vec<String>);
@@ -60,7 +67,8 @@ pub struct Engine {
     settings: Arc<SettingsStore>,
     resolver: Arc<Resolver>,
     pool: Mutex<Option<ThreadPool>>,
-    observer: Mutex<Option<Arc<dyn EngineObserver>>>,
+    /// Shared with lookup jobs, so `close` and `set_observer` reach them too.
+    observer: SharedObserver,
     /// Batches of ids from `delete_items`, most recent last.
     undo: Mutex<Vec<Vec<String>>>,
     closed: AtomicBool,
@@ -94,7 +102,10 @@ impl Engine {
             None => SettingsStore::default_dir()?,
         };
         let settings = SettingsStore::open(settings_dir);
-        settings.remember_library(library.dir())?;
+        // A read-only config directory must not keep the user out of their library.
+        if let Err(error) = settings.remember_library(library.dir()) {
+            tracing::warn!(%error, "could not add the library to the recent list");
+        }
         let http = options.http.unwrap_or_else(|| Arc::new(UreqClient::new()));
         tracing::info!(path = %library.dir().display(), "library opened");
         Ok(Engine {
@@ -102,7 +113,7 @@ impl Engine {
             settings: Arc::new(settings),
             resolver: Arc::new(Resolver::new(http)),
             pool: Mutex::new(Some(ThreadPool::new(POOL_SIZE))),
-            observer: Mutex::new(None),
+            observer: Arc::new(Mutex::new(None)),
             undo: Mutex::new(Vec::new()),
             closed: AtomicBool::new(false),
         })
@@ -112,9 +123,10 @@ impl Engine {
         self.library.dir()
     }
 
-    /// Stops the engine threads. Every later call returns `PaperError::Closed`.
-    /// Lookups that are still running finish, then the database closes when
-    /// the last reference to the engine goes away.
+    /// Stops accepting work; every later call returns `PaperError::Closed`.
+    /// Returns at once. A lookup that is still waiting on the network finishes
+    /// on its own thread without telling the observer, and the database closes
+    /// when the last of the engine and such lookups goes away.
     pub fn close(&self) {
         self.closed.store(true, Ordering::SeqCst);
         let pool = self.pool.lock().unwrap().take();
@@ -159,7 +171,7 @@ impl Engine {
         })?;
         let doi = identifier.doi();
 
-        let item_id = match self.library.find_item_by_doi(&doi)? {
+        let (item_id, placeholder) = match self.library.find_item_by_doi(&doi)? {
             Some(found) if !found.deleted => {
                 return Err(PaperError::Duplicate {
                     doi,
@@ -171,35 +183,49 @@ impl Engine {
                     .restore_items(std::slice::from_ref(&found.item_id))?;
                 self.library
                     .set_lookup_status(&found.item_id, LookupStatus::Pending)?;
-                found.item_id
+                // It is live again, so there is nothing left to undo for it.
+                let mut undo = self.undo.lock().unwrap();
+                for batch in undo.iter_mut() {
+                    batch.retain(|id| *id != found.item_id);
+                }
+                undo.retain(|batch| !batch.is_empty());
+                (found.item_id, false)
             }
             None => {
                 let placeholder = ItemFields {
-                    kind: Some(match identifier {
-                        Identifier::Arxiv(_) => ItemKind::Preprint,
-                        Identifier::Doi(_) => ItemKind::Other,
+                    kind: Some(if identifier.arxiv_id().is_some() {
+                        ItemKind::Preprint
+                    } else {
+                        ItemKind::Other
                     }),
                     doi: Some(doi.clone()),
                     arxiv_id: identifier.arxiv_id(),
                     title: identifier.to_string(),
                     ..ItemFields::default()
                 };
-                self.library
-                    .insert_item(&placeholder, LookupStatus::Pending)?
+                let id = self
+                    .library
+                    .insert_item(&placeholder, LookupStatus::Pending)?;
+                (id, true)
             }
         };
         self.notify(|observer| observer.items_changed(vec![item_id.clone()]));
-        self.lookup(item_id, identifier).await
+        self.lookup(item_id, identifier, placeholder).await
     }
 
     /// Runs the metadata lookup again for an item whose lookup failed or that
-    /// was added offline.
+    /// was added offline. Every field is replaced by what the lookup returns.
     pub async fn retry_lookup(&self, item_id: &str) -> Result<ItemRow> {
         self.ensure_open()?;
         let detail = self.library.item(item_id)?;
-        let identifier = match (&detail.fields.arxiv_id, &detail.fields.doi) {
-            (Some(arxiv), _) => Identifier::Arxiv(arxiv.clone()),
-            (None, Some(doi)) => Identifier::Doi(doi.clone()),
+        let identifier = match (&detail.fields.doi, &detail.fields.arxiv_id) {
+            // The arXiv ID the user typed beats its own DataCite DOI, but a
+            // journal DOI the user entered beats the arXiv ID.
+            (Some(doi), Some(arxiv)) if Identifier::Doi(doi.clone()).arxiv_id().is_some() => {
+                Identifier::Arxiv(arxiv.clone())
+            }
+            (Some(doi), _) => Identifier::Doi(doi.clone()),
+            (None, Some(arxiv)) => Identifier::Arxiv(arxiv.clone()),
             (None, None) => {
                 return Err(PaperError::InvalidIdentifier {
                     text: detail.fields.title,
@@ -209,63 +235,39 @@ impl Engine {
         self.library
             .set_lookup_status(item_id, LookupStatus::Pending)?;
         self.notify(|observer| observer.items_changed(vec![item_id.to_string()]));
-        self.lookup(item_id.to_string(), identifier).await
+        self.lookup(item_id.to_string(), identifier, false).await
     }
 
-    async fn lookup(&self, item_id: String, identifier: Identifier) -> Result<ItemRow> {
-        let doi = identifier.doi();
-        self.notify(|observer| observer.lookup_progress(item_id.clone(), LookupStatus::Pending));
-
+    /// Looks up `identifier` and writes the result into the item, all on an
+    /// engine thread: the caller only awaits the final row. `placeholder` says
+    /// the row was inserted for this lookup and holds nothing the user made.
+    async fn lookup(
+        &self,
+        item_id: String,
+        identifier: Identifier,
+        placeholder: bool,
+    ) -> Result<ItemRow> {
+        let job = LookupJob {
+            library: Arc::clone(&self.library),
+            observer: Arc::clone(&self.observer),
+            item_id,
+            doi: identifier.doi(),
+        };
+        let fallback = job.clone();
         let resolver = Arc::clone(&self.resolver);
         let contact = Contact::new(self.settings.settings().contact_email);
-        let job_identifier = identifier.clone();
-        let result = self
-            .run(move || resolver.lookup(&job_identifier, &contact))
-            .await;
-
-        let outcome = match result {
-            Ok(Ok(lookup)) => self
-                .library
-                .replace_metadata(&item_id, &lookup.fields, LookupStatus::Done)
-                .and_then(|()| {
-                    for record in &lookup.records {
-                        self.library
-                            .put_source_record(&item_id, &record.source, &record.json)?;
-                    }
-                    Ok(())
-                }),
-            Ok(Err(FetchError::NotFound { doi })) => Err(PaperError::MetadataNotFound {
-                doi,
-                item_id: item_id.clone(),
+        match self
+            .run(move || job.run(resolver.lookup(&identifier, &contact), placeholder))
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(PoolError::Closed) => Err(PaperError::Closed),
+            // The job died before it could mark the row, so do that here.
+            Err(PoolError::Panicked(message)) => fallback.fail(PaperError::Lookup {
+                doi: fallback.doi.clone(),
+                item_id: fallback.item_id.clone(),
+                message: format!("the lookup crashed: {message}"),
             }),
-            Ok(Err(error)) => Err(PaperError::Lookup {
-                doi: doi.clone(),
-                item_id: item_id.clone(),
-                message: error.to_string(),
-            }),
-            Err(closed) => Err(closed),
-        };
-
-        match outcome {
-            Ok(()) => {
-                self.notify(|observer| {
-                    observer.lookup_progress(item_id.clone(), LookupStatus::Done)
-                });
-                self.notify(|observer| observer.items_changed(vec![item_id.clone()]));
-                self.library.item_row(&item_id)
-            }
-            Err(error) => {
-                tracing::warn!(%doi, %error, "lookup failed");
-                // The item may have been deleted while the lookup ran; that is fine.
-                let _ = self
-                    .library
-                    .set_lookup_status(&item_id, LookupStatus::Failed);
-                self.notify(|observer| {
-                    observer.lookup_progress(item_id.clone(), LookupStatus::Failed)
-                });
-                self.notify(|observer| observer.items_changed(vec![item_id.clone()]));
-                Err(error)
-            }
         }
     }
 
@@ -277,6 +279,13 @@ impl Engine {
             patch.doi = Some(paper_ids::normalize_doi(doi).ok_or_else(|| {
                 PaperError::InvalidIdentifier {
                     text: doi.to_string(),
+                }
+            })?);
+        }
+        if let Some(arxiv) = patch.arxiv_id.as_deref().filter(|id| !id.is_empty()) {
+            patch.arxiv_id = Some(paper_ids::normalize_arxiv_id(arxiv).ok_or_else(|| {
+                PaperError::InvalidIdentifier {
+                    text: arxiv.to_string(),
                 }
             })?);
         }
@@ -292,7 +301,12 @@ impl Engine {
         if deleted.is_empty() {
             return Ok(());
         }
-        self.undo.lock().unwrap().push(deleted.clone());
+        let mut undo = self.undo.lock().unwrap();
+        undo.push(deleted.clone());
+        if undo.len() > MAX_UNDO_BATCHES {
+            undo.remove(0);
+        }
+        drop(undo);
         self.notify(|observer| observer.items_changed(deleted));
         self.notify(|observer| observer.collections_changed());
         self.notify(|observer| observer.tags_changed());
@@ -442,23 +456,113 @@ impl Engine {
     fn run<T: Send + 'static, F: FnOnce() -> T + Send + 'static>(
         &self,
         job: F,
-    ) -> impl Future<Output = Result<T>> + Send + use<T, F> {
+    ) -> impl Future<Output = std::result::Result<T, PoolError>> + Send + use<T, F> {
         let pool = self.pool.lock().unwrap();
         let future = pool.as_ref().map(|pool| pool.run(job));
         async move {
             match future {
                 Some(future) => future.await,
-                None => Err(PaperError::Closed),
+                None => Err(PoolError::Closed),
             }
         }
     }
 
     fn notify(&self, call: impl FnOnce(&dyn EngineObserver)) {
-        // Clone the observer out so the lock is not held during the callback.
-        let observer = self.observer.lock().unwrap().clone();
-        if let Some(observer) = observer {
-            call(observer.as_ref());
+        notify(&self.observer, call);
+    }
+}
+
+fn notify(observer: &SharedObserver, call: impl FnOnce(&dyn EngineObserver)) {
+    // Clone the observer out so the lock is not held during the callback.
+    let observer = observer.lock().unwrap().clone();
+    if let Some(observer) = observer {
+        call(observer.as_ref());
+    }
+}
+
+/// The part of a lookup that runs on an engine thread: the network call, the
+/// database writes, and the events. Nothing here runs on the caller's thread.
+#[derive(Clone)]
+struct LookupJob {
+    library: Arc<Library>,
+    observer: SharedObserver,
+    item_id: String,
+    doi: String,
+}
+
+impl LookupJob {
+    fn run(
+        &self,
+        result: std::result::Result<paper_fetch::Lookup, FetchError>,
+        placeholder: bool,
+    ) -> Result<ItemRow> {
+        notify(&self.observer, |observer| {
+            observer.lookup_progress(self.item_id.clone(), LookupStatus::Pending)
+        });
+        let outcome = match result {
+            Ok(lookup) => self
+                .library
+                .replace_metadata(&self.item_id, &lookup.fields, LookupStatus::Done)
+                .and_then(|()| {
+                    for record in &lookup.records {
+                        self.library.put_source_record(
+                            &self.item_id,
+                            &record.source,
+                            &record.json,
+                        )?;
+                    }
+                    Ok(())
+                }),
+            Err(FetchError::NotFound { doi }) => Err(PaperError::MetadataNotFound {
+                doi,
+                item_id: self.item_id.clone(),
+            }),
+            Err(error) => Err(PaperError::Lookup {
+                doi: self.doi.clone(),
+                item_id: self.item_id.clone(),
+                message: error.to_string(),
+            }),
+        };
+        match outcome {
+            Ok(()) => {
+                notify(&self.observer, |observer| {
+                    observer.lookup_progress(self.item_id.clone(), LookupStatus::Done)
+                });
+                notify(&self.observer, |observer| {
+                    observer.items_changed(vec![self.item_id.clone()])
+                });
+                self.library.item_row(&self.item_id)
+            }
+            // The source answered with a DOI that another item already has
+            // (an alias of the typed one). A placeholder for it is junk.
+            Err(error @ PaperError::Duplicate { .. }) if placeholder => {
+                tracing::warn!(doi = %self.doi, %error, "lookup found an existing item");
+                self.library.purge_item(&self.item_id)?;
+                notify(&self.observer, |observer| {
+                    observer.items_changed(vec![self.item_id.clone()])
+                });
+                Err(error)
+            }
+            Err(error) => self.fail(error),
         }
+    }
+
+    /// Leaves the item in the `Failed` state for `retry_lookup` and returns `error`.
+    fn fail(&self, error: PaperError) -> Result<ItemRow> {
+        tracing::warn!(doi = %self.doi, %error, "lookup failed");
+        if let Err(status_error) = self
+            .library
+            .set_lookup_status(&self.item_id, LookupStatus::Failed)
+        {
+            tracing::warn!(item_id = %self.item_id, %status_error, "could not mark the lookup failed");
+        }
+        notify(&self.observer, |observer| {
+            observer.lookup_progress(self.item_id.clone(), LookupStatus::Failed)
+        });
+        notify(&self.observer, |observer| {
+            observer.items_changed(vec![self.item_id.clone()])
+        });
+        Err(error)
     }
 }
 

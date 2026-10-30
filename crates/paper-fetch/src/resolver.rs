@@ -130,7 +130,7 @@ fn fill_arxiv_id(fields: &mut ItemFields, identifier: &Identifier) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::FakeHttp;
+    use crate::testing::{FakeHttp, json_response};
     use paper_core::ItemKind;
 
     fn fixture(name: &str) -> Vec<u8> {
@@ -254,6 +254,51 @@ mod tests {
             .filter(|request| request.url.ends_with("broken"))
             .count();
         assert_eq!(attempts, ATTEMPTS as usize, "5xx is retried");
+    }
+
+    #[test]
+    fn rate_limiting_is_retried_after_the_server_says_so() {
+        let http = Arc::new(FakeHttp::new());
+        http.route_responses(
+            "https://api.crossref.org/works/10.1038/nature14539",
+            vec![
+                json_response(429, Vec::new(), Some(0)),
+                json_response(503, Vec::new(), Some(0)),
+                json_response(200, fixture("crossref_nature14539.json"), None),
+            ],
+        );
+        let resolver = Resolver::new(http.clone());
+        let started = std::time::Instant::now();
+        let lookup = resolver
+            .lookup(
+                &Identifier::Doi("10.1038/nature14539".into()),
+                &Contact::default(),
+            )
+            .unwrap();
+        assert_eq!(lookup.fields.title, "Deep learning");
+        assert_eq!(
+            http.requests().len(),
+            3,
+            "429 and 5xx are retried against the same URL"
+        );
+        assert!(
+            started.elapsed() < DEFAULT_BACKOFF,
+            "Retry-After: 0 beats the default backoff, took {:?}",
+            started.elapsed()
+        );
+
+        http.route_responses(
+            "https://api.crossref.org/works/10.9999/busy",
+            vec![json_response(429, Vec::new(), Some(0))],
+        );
+        assert_eq!(
+            resolver.lookup(&Identifier::Doi("10.9999/busy".into()), &Contact::default()),
+            Err(FetchError::Status {
+                status: 429,
+                url: "https://api.crossref.org/works/10.9999/busy".into()
+            }),
+            "after the last attempt the status is reported, not retried forever"
+        );
     }
 
     #[test]

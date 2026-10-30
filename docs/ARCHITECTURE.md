@@ -67,7 +67,7 @@ Dependency direction is strictly `paper-ffi` → `paper-engine` → (`paper-core
 | Notes | `note(item_id)`, `save_note(item_id, markdown)` | Autosave calls `save_note` with a debounce in the app. |
 | Citations | `bibtex(ids) -> String`, `citation(ids, style) -> String`, `export_bib(ids, path)` | |
 | Settings | `settings()`, `update_settings(Patch)` | Contact email, OpenAlex key, window state, panel sizes. |
-| Events | `set_observer(Arc<dyn EngineObserver>)` with `items_changed(ids)`, `collections_changed()`, `tags_changed()`, `lookup_progress(item_id, LookupStatus)`, `attachment_ready(item_id, attachment_id)` | A foreign trait the app implements. Called on engine threads. Errors are not events: every `async fn` returns its own `PaperError`, and lookup errors carry the id of the row they left behind. |
+| Events | `set_observer(Arc<dyn EngineObserver>)` with `items_changed(ids)`, `collections_changed()`, `tags_changed()`, `lookup_progress(item_id, LookupStatus)`, `attachment_ready(item_id, attachment_id)` | A foreign trait the app implements. An event caused by a synchronous call arrives on the caller's thread before that call returns; everything a lookup does after it leaves for the network (database writes and events) runs on an engine thread, so the app hops to the main thread asynchronously, never with a blocking dispatch. Errors are not events: every `async fn` returns its own `PaperError`, and lookup errors carry the id of the row they left behind. |
 
 Rules for the API. Reads that the UI needs on every keystroke or scroll, such as `list_items`, are synchronous and return in a few milliseconds from the database. Anything that touches the network or takes more than a few milliseconds is an `async fn` that completes a UniFFI future on the engine's thread pool. Records are plain data (`ItemRow`, `ItemDetail`, `CollectionNode`, `Annotation`, `AttachmentFile`), enums are closed sets (`ItemKind`, `AnnotationKind`, `LookupStatus`, `SortColumn`), errors are one `PaperError` enum with a variant per subsystem, and no method returns a handle that the caller must keep alive except `Engine` itself. The app subscribes once with `set_observer`, so nothing in the engine ever calls back into the UI toolkit.
 
@@ -77,14 +77,14 @@ The library directory is chosen on first launch. The chooser offers to create a 
 
 ```text
 <library>/
-├── library.db          SQLite, WAL mode
+├── library.db          SQLite, WAL mode; the WAL is folded back into this file on close so a synced folder sees one file
 ├── files/
 │   └── <item uuid>/
 │       └── <sanitized title>.pdf
 └── cache/              page thumbnails, extracted text; safe to delete
 ```
 
-Settings (recent libraries, window state, theme, contact email for API user agents, OpenAlex key) are stored separately in the platform config directory (`~/Library/Application Support/com.betty2310.paper` on macOS, `%APPDATA%\betty2310\paper` on Windows, `~/.config/paper` on Linux) as `settings.json`, so a library directory can be shared between machines without sharing machine settings. The sandboxed macOS app also stores a security scoped bookmark for each recent library next to the settings, because the sandbox forgets folder access between launches otherwise.
+Settings (recent libraries, window state, theme, contact email for API user agents, OpenAlex key) are stored separately in the platform config directory (`~/Library/Application Support/com.betty2310.paper` on macOS, `%APPDATA%\betty2310\paper\config` on Windows, `~/.config/paper` on Linux) as `settings.json`, so a library directory can be shared between machines without sharing machine settings. The sandboxed macOS app also stores a security scoped bookmark for each recent library next to the settings, because the sandbox forgets folder access between launches otherwise.
 
 ## Database schema
 
@@ -194,7 +194,7 @@ The engine owns its threads, and the app owns the main thread. Nothing in the en
 
 1. Synchronous engine reads (`list_items`, `item_detail`, `annotations`, `collection_tree`) run on the caller's thread against a `Mutex<Connection>`. They are called from the main thread and must return in a few milliseconds, which the 5,000 item target in `docs/PRD.md` holds at. Writes are short transactions on the same connection.
 2. Async engine work (lookups, downloads, imports, exports, Zotero import) runs on a small fixed thread pool inside the engine. UniFFI turns each `async fn` into a Swift `async` call. HTTP uses the blocking `ureq` client on these threads. The resolver pipeline runs the lookups for one item sequentially and several items concurrently, with a per host rate limiter (Crossref 10 per second, arXiv one per three seconds, others 5 per second).
-3. Events reach the app through `EngineObserver` on an engine thread. The app's `LibraryStore` forwards each call to the main thread before it touches any view.
+3. Events reach the app through `EngineObserver`: on the caller's thread for synchronous calls, on an engine thread for everything a lookup does once it has left for the network. The app's `LibraryStore` forwards each call to the main thread asynchronously before it touches any view. `close()` returns at once; a lookup still waiting on the network finishes on its thread without reaching the observer, and the database closes when the last reference goes away.
 4. PDF work on macOS is PDFKit's. `PDFView` renders pages on its own background threads and the app never renders a page bitmap itself. Opening a `PDFDocument` and building the thumbnail strip happen on a utility queue, then the document is handed to the main thread.
 
 ```diagram

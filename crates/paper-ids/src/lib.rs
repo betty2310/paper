@@ -92,6 +92,16 @@ pub fn normalize_doi(text: &str) -> Option<String> {
     (prefix_ok && suffix_ok).then(|| trimmed.to_lowercase())
 }
 
+/// Accepts a bare arXiv ID, `arXiv:<id>`, or an arxiv.org abs or pdf URL and
+/// returns the bare ID with its version, or `None` if the text is not one.
+pub fn normalize_arxiv_id(text: &str) -> Option<String> {
+    let text = text.trim();
+    if text.chars().any(char::is_whitespace) {
+        return None;
+    }
+    parse_arxiv(text)
+}
+
 /// Accepts a bare arXiv ID, `arXiv:<id>`, or an arxiv.org abs or pdf URL.
 fn parse_arxiv(text: &str) -> Option<String> {
     let mut rest = text;
@@ -306,6 +316,20 @@ mod tests {
                 .as_deref(),
             Some("1706.03762v2")
         );
+    }
+
+    #[test]
+    fn edited_arxiv_ids_normalize_like_typed_ones() {
+        assert_eq!(
+            normalize_arxiv_id(" arXiv:1706.03762v7 ").as_deref(),
+            Some("1706.03762v7")
+        );
+        assert_eq!(
+            normalize_arxiv_id("https://arxiv.org/abs/hep-th/9901001").as_deref(),
+            Some("hep-th/9901001")
+        );
+        assert_eq!(normalize_arxiv_id("1706.03762 v7"), None);
+        assert_eq!(normalize_arxiv_id("10.1038/nature14539"), None);
     }
 
     #[test]

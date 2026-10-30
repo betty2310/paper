@@ -10,9 +10,26 @@ pub const SOURCE: &str = "crossref";
 pub fn work_url(doi: &str, email: Option<&str>) -> String {
     let encoded = percent_encode_path(doi);
     match email {
-        Some(email) => format!("https://api.crossref.org/works/{encoded}?mailto={email}"),
+        Some(email) => format!(
+            "https://api.crossref.org/works/{encoded}?mailto={}",
+            percent_encode_query_value(email)
+        ),
         None => format!("https://api.crossref.org/works/{encoded}"),
     }
+}
+
+/// Encodes a query value; `+` in an address would otherwise arrive as a space.
+fn percent_encode_query_value(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'@' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 /// Maps the `message` object of a Crossref work onto our fields.
@@ -288,6 +305,11 @@ mod tests {
         assert_eq!(
             work_url("10.1038/nature14539", None),
             "https://api.crossref.org/works/10.1038/nature14539"
+        );
+        assert_eq!(
+            work_url("10.1038/nature14539", Some("me+paper@gmail.com")),
+            "https://api.crossref.org/works/10.1038/nature14539?mailto=me%2Bpaper@gmail.com",
+            "a plus in the address must not become a space"
         );
     }
 }

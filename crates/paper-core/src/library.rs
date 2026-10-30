@@ -90,7 +90,19 @@ impl Library {
     pub fn dir(&self) -> &Path {
         &self.dir
     }
+}
 
+impl Drop for Library {
+    /// Folds the WAL back into `library.db` so a library in a synced folder
+    /// (Dropbox, iCloud Drive) leaves one file behind, not three.
+    fn drop(&mut self) {
+        if let Ok(conn) = self.conn.lock() {
+            let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+        }
+    }
+}
+
+impl Library {
     pub fn files_dir(&self) -> PathBuf {
         self.dir.join(LIBRARY_FILES_DIR)
     }
@@ -140,7 +152,9 @@ impl Library {
         Ok(id)
     }
 
-    /// Overwrites every metadata field of an item, as after a lookup.
+    /// Overwrites every metadata field of an item, as after a lookup. Works on
+    /// a deleted item too, so a lookup that finishes after the user deleted the
+    /// row still lands and an undo brings back the finished item.
     pub fn replace_metadata(
         &self,
         id: &str,
@@ -149,7 +163,7 @@ impl Library {
     ) -> Result<()> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
-        require_live_item(&tx, id)?;
+        require_item(&tx, id)?;
         if let Some(doi) = fields.doi.as_deref() {
             check_doi_free(&tx, doi, Some(id))?;
         }
@@ -252,13 +266,48 @@ impl Library {
         Ok(())
     }
 
+    /// Sets the lookup state of an item, deleted or not (see `replace_metadata`).
     pub fn set_lookup_status(&self, id: &str, status: LookupStatus) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let changed = conn.execute(
-            "UPDATE items SET lookup_status = ?2, modified_at = ?3 WHERE id = ?1 AND deleted_at IS NULL",
+            "UPDATE items SET lookup_status = ?2, modified_at = ?3 WHERE id = ?1",
             params![id, status.as_str(), time::now()],
         )?;
         not_found_if_zero(changed, id)
+    }
+
+    /// Removes an item and everything that hangs off it for good. For rows the
+    /// user never saw finished, such as a placeholder whose lookup turned out
+    /// to be a duplicate; `delete_items` is the undoable delete.
+    pub fn purge_item(&self, id: &str) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        require_item(&tx, id)?;
+        tx.execute(
+            "DELETE FROM annotations WHERE attachment_id IN (SELECT id FROM attachments WHERE item_id = ?1)",
+            params![id],
+        )?;
+        for table in [
+            "attachments",
+            "creators",
+            "collection_items",
+            "item_tags",
+            "notes",
+            "source_records",
+            "items_fts",
+        ] {
+            tx.execute(
+                &format!("DELETE FROM {table} WHERE item_id = ?1"),
+                params![id],
+            )?;
+        }
+        tx.execute("DELETE FROM items WHERE id = ?1", params![id])?;
+        tx.execute(
+            "DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM item_tags)",
+            [],
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 
     /// The live item with this DOI, or else the most recently deleted one.
@@ -380,11 +429,13 @@ impl Library {
         })
     }
 
-    /// One table row, for refreshing a single item after a change.
+    /// One table row, for refreshing a single item after a change. Finds a
+    /// deleted item too: a lookup that lands after a delete still reports
+    /// what it found.
     pub fn item_row(&self, id: &str) -> Result<ItemRow> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            &format!("{ITEM_ROW_SELECT} WHERE i.id = ?1 AND i.deleted_at IS NULL"),
+            &format!("{ITEM_ROW_SELECT} WHERE i.id = ?1"),
             params![id],
             read_item_row,
         )
@@ -705,7 +756,8 @@ impl Library {
 
     // ----- tags -----
 
-    /// Every tag in use, by name.
+    /// Every tag on a live item, by name. A tag whose only items are in the
+    /// trash is kept for undo but not listed.
     pub fn tags(&self) -> Result<Vec<Tag>> {
         let conn = self.conn.lock().unwrap();
         let tags = conn
@@ -713,7 +765,10 @@ impl Library {
                 "SELECT t.id, t.name, t.color,
                         (SELECT count(*) FROM item_tags it JOIN items i ON i.id = it.item_id
                          WHERE it.tag_id = t.id AND i.deleted_at IS NULL) AS item_count
-                 FROM tags t ORDER BY t.name COLLATE NOCASE",
+                 FROM tags t
+                 WHERE EXISTS (SELECT 1 FROM item_tags it JOIN items i ON i.id = it.item_id
+                               WHERE it.tag_id = t.id AND i.deleted_at IS NULL)
+                 ORDER BY t.name COLLATE NOCASE",
             )?
             .query_map([], read_tag)?
             .collect::<rusqlite::Result<_>>()?;
@@ -962,6 +1017,18 @@ fn not_found_if_zero(changed: usize, id: &str) -> Result<()> {
     Ok(())
 }
 
+fn require_item(conn: &Connection, id: &str) -> Result<()> {
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM items WHERE id = ?1)",
+        params![id],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        return Err(PaperError::NotFound { id: id.to_string() });
+    }
+    Ok(())
+}
+
 fn require_live_item(conn: &Connection, id: &str) -> Result<()> {
     let exists: bool = conn.query_row(
         "SELECT EXISTS (SELECT 1 FROM items WHERE id = ?1 AND deleted_at IS NULL)",
@@ -1177,6 +1244,64 @@ mod tests {
         let reopened = Library::open(&path).unwrap();
         assert_eq!(reopened.item(&id).unwrap().fields.title, "Persisted");
         assert_eq!(reopened.dir(), path);
+        drop(reopened);
+        assert!(
+            !path.join(format!("{LIBRARY_DB_NAME}-wal")).exists(),
+            "closing folds the WAL into the database file"
+        );
+
+        Connection::open(path.join(LIBRARY_DB_NAME))
+            .unwrap()
+            .pragma_update(None, "user_version", 99)
+            .unwrap();
+        assert!(
+            matches!(
+                Library::open(&path),
+                Err(PaperError::Library { message }) if message.contains("newer version")
+            ),
+            "a database from a newer Paper is refused, not migrated or broken"
+        );
+    }
+
+    #[test]
+    fn purging_an_item_removes_it_and_everything_attached_to_it() {
+        let (library, deep, attention, _) = seeded();
+        let collection = library.create_collection("Reading", None).unwrap();
+        library
+            .add_to_collection(&collection, &[deep.clone(), attention.clone()])
+            .unwrap();
+        library.set_tags(&deep, &["only-here".into()]).unwrap();
+        library.save_note(&deep, "gone").unwrap();
+        library.put_source_record(&deep, "crossref", "{}").unwrap();
+
+        library.purge_item(&deep).unwrap();
+
+        assert!(matches!(
+            library.item(&deep),
+            Err(PaperError::NotFound { .. })
+        ));
+        assert!(matches!(
+            library.item_row(&deep),
+            Err(PaperError::NotFound { .. })
+        ));
+        assert!(matches!(
+            library.purge_item(&deep),
+            Err(PaperError::NotFound { .. })
+        ));
+        assert!(
+            library
+                .find_item_by_doi("10.1038/nature14539")
+                .unwrap()
+                .is_none()
+        );
+        assert!(library.tags().unwrap().is_empty(), "its tag is pruned");
+        assert!(titles(&library, &search("gone")).is_empty());
+        assert!(library.source_records(&deep).unwrap().is_empty());
+        assert_eq!(library.collection_tree().unwrap()[0].item_count, 1);
+        assert_eq!(
+            library.item(&attention).unwrap().collection_ids,
+            [collection]
+        );
     }
 
     #[test]
@@ -1298,6 +1423,10 @@ mod tests {
             1,
             "punctuation does not break the query"
         );
+        assert!(
+            titles(&library, &search("deep OR NOT -learn* AND ^\"")).is_empty(),
+            "FTS operators are quoted as plain words, not syntax (and no SQL error)"
+        );
         assert_eq!(
             titles(&library, &search("   ")).len(),
             3,
@@ -1393,19 +1522,19 @@ mod tests {
             "deleted items are not searchable"
         );
         assert_eq!(library.collection_tree().unwrap()[0].item_count, 1);
-        assert!(
-            library
-                .tags()
-                .unwrap()
-                .iter()
-                .all(|tag| tag.item_count == 0)
-        );
         assert!(matches!(
             library.item(&deep),
             Err(PaperError::NotFound { .. })
         ));
+        assert!(
+            library.tags().unwrap().is_empty(),
+            "a tag with only deleted items is not listed"
+        );
+        library
+            .set_lookup_status(&deep, LookupStatus::Done)
+            .expect("a lookup that lands after the delete still writes the trash row");
         assert!(matches!(
-            library.set_lookup_status(&deep, LookupStatus::Done),
+            library.set_lookup_status("missing", LookupStatus::Done),
             Err(PaperError::NotFound { .. })
         ));
 

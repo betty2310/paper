@@ -2,6 +2,8 @@
 //! client, the way the app uses it.
 
 use std::sync::{Arc, Mutex};
+use std::thread::{self, ThreadId};
+use std::time::{Duration, Instant};
 
 use paper_engine::{
     Engine, EngineObserver, EngineOptions, ItemKind, ItemQuery, LookupStatus, MetadataPatch,
@@ -30,27 +32,39 @@ enum Event {
     Lookup(String, LookupStatus),
 }
 
+/// Records every event with the thread it arrived on.
 #[derive(Default)]
-struct Recorder(Mutex<Vec<Event>>);
+struct Recorder(Mutex<Vec<(Event, ThreadId)>>);
 
 impl Recorder {
     fn take(&self) -> Vec<Event> {
+        self.take_with_threads()
+            .into_iter()
+            .map(|(event, _)| event)
+            .collect()
+    }
+
+    fn take_with_threads(&self) -> Vec<(Event, ThreadId)> {
         std::mem::take(&mut self.0.lock().unwrap())
+    }
+
+    fn push(&self, event: Event) {
+        self.0.lock().unwrap().push((event, thread::current().id()));
     }
 }
 
 impl EngineObserver for Recorder {
     fn items_changed(&self, ids: Vec<String>) {
-        self.0.lock().unwrap().push(Event::Items(ids));
+        self.push(Event::Items(ids));
     }
     fn collections_changed(&self) {
-        self.0.lock().unwrap().push(Event::Collections);
+        self.push(Event::Collections);
     }
     fn tags_changed(&self) {
-        self.0.lock().unwrap().push(Event::Tags);
+        self.push(Event::Tags);
     }
     fn lookup_progress(&self, item_id: String, status: LookupStatus) {
-        self.0.lock().unwrap().push(Event::Lookup(item_id, status));
+        self.push(Event::Lookup(item_id, status));
     }
 }
 
@@ -106,9 +120,12 @@ fn adding_by_doi_shows_a_placeholder_then_the_looked_up_metadata() {
     assert_eq!(row.kind, ItemKind::JournalArticle);
     assert_eq!(row.lookup_status, LookupStatus::Done);
 
-    let events = h.events.take();
+    let events = h.events.take_with_threads();
     assert_eq!(
-        events,
+        events
+            .iter()
+            .map(|(event, _)| event.clone())
+            .collect::<Vec<_>>(),
         vec![
             Event::Items(vec![row.id.clone()]),
             Event::Lookup(row.id.clone(), LookupStatus::Pending),
@@ -116,6 +133,15 @@ fn adding_by_doi_shows_a_placeholder_then_the_looked_up_metadata() {
             Event::Items(vec![row.id.clone()]),
         ],
         "the app hears about the placeholder before the lookup runs"
+    );
+    let caller = thread::current().id();
+    assert_eq!(
+        events[0].1, caller,
+        "the placeholder is announced before the call returns"
+    );
+    assert!(
+        events[1..].iter().all(|(_, thread)| *thread != caller),
+        "everything the lookup does happens on an engine thread, not where the future is polled"
     );
     let detail = h.engine.item_detail(&row.id).unwrap();
     assert_eq!(detail.fields.creators.len(), 3);
@@ -262,7 +288,10 @@ fn delete_can_be_undone_and_the_app_is_told_what_changed() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].id, attention.id);
     assert_eq!(h.engine.collection_tree().unwrap()[0].item_count, 0);
-    assert!(h.engine.tags().unwrap().is_empty() || h.engine.tags().unwrap()[0].item_count == 0);
+    assert!(
+        h.engine.tags().unwrap().is_empty(),
+        "a tag whose only paper is in the trash leaves the sidebar"
+    );
 
     h.engine.delete_items(&["missing".into()]).unwrap();
     assert!(
@@ -299,6 +328,8 @@ fn re_adding_a_deleted_doi_restores_the_same_item() {
         .delete_items(std::slice::from_ref(&deep.id))
         .unwrap();
 
+    assert!(h.engine.can_undo_delete());
+
     let again = block_on(h.engine.add_by_identifier("10.1038/nature14539")).unwrap();
     assert_eq!(again.id, deep.id);
     assert_eq!(h.engine.note(&deep.id).unwrap().as_deref(), Some("keep me"));
@@ -308,6 +339,202 @@ fn re_adding_a_deleted_doi_restores_the_same_item() {
         2,
         "the metadata is looked up again"
     );
+    assert!(
+        !h.engine.can_undo_delete(),
+        "the item is back, so there is nothing left to undo"
+    );
+    assert_eq!(h.engine.undo_delete().unwrap(), Vec::<String>::new());
+}
+
+#[test]
+fn a_doi_that_resolves_to_a_paper_already_in_the_library_leaves_no_junk_row() {
+    let h = harness();
+    let deep = block_on(h.engine.add_by_identifier("10.1038/nature14539")).unwrap();
+    // Crossref answers an alias with the record of the canonical DOI.
+    h.http.route(
+        "https://api.crossref.org/works/10.1038/nature14539.alias",
+        200,
+        fixture("crossref_nature14539.json"),
+    );
+    h.events.take();
+
+    let error = block_on(h.engine.add_by_identifier("10.1038/nature14539.alias")).unwrap_err();
+    assert_eq!(
+        error,
+        PaperError::Duplicate {
+            doi: "10.1038/nature14539".into(),
+            item_id: deep.id.clone()
+        },
+        "the app can select the paper it already has"
+    );
+    let rows = h.engine.list_items(&ItemQuery::default()).unwrap();
+    assert_eq!(rows.len(), 1, "no failed placeholder is left behind");
+    assert_eq!(rows[0].id, deep.id);
+    let events = h.events.take();
+    let Event::Items(placeholder) = &events[0] else {
+        panic!("{events:?}");
+    };
+    assert_ne!(placeholder[0], deep.id);
+    assert_eq!(
+        events.last(),
+        Some(&Event::Items(placeholder.clone())),
+        "the table is told to drop the placeholder"
+    );
+    assert!(
+        !events.contains(&Event::Lookup(placeholder[0].clone(), LookupStatus::Failed)),
+        "{events:?}"
+    );
+}
+
+#[test]
+fn deleting_an_item_while_its_lookup_runs_keeps_the_result_for_undo() {
+    let h = harness();
+    h.http.hold();
+    let result = thread::scope(|scope| {
+        let adding = scope.spawn(|| block_on(h.engine.add_by_identifier("10.1038/nature14539")));
+        h.http.wait_for_held_request();
+        let placeholder = h
+            .engine
+            .list_items(&ItemQuery::default())
+            .unwrap()
+            .remove(0);
+        assert_eq!(placeholder.lookup_status, LookupStatus::Pending);
+        h.engine
+            .delete_items(std::slice::from_ref(&placeholder.id))
+            .unwrap();
+        h.http.release();
+        adding.join().unwrap()
+    });
+
+    let row = result.expect("the lookup still completes");
+    assert_eq!(row.title, "Deep learning");
+    assert!(
+        h.engine
+            .list_items(&ItemQuery::default())
+            .unwrap()
+            .is_empty(),
+        "the delete stands"
+    );
+    assert_eq!(h.engine.undo_delete().unwrap(), vec![row.id.clone()]);
+    let restored = h
+        .engine
+        .list_items(&ItemQuery::default())
+        .unwrap()
+        .remove(0);
+    assert_eq!(restored.title, "Deep learning");
+    assert_eq!(restored.lookup_status, LookupStatus::Done);
+    assert_eq!(
+        h.engine
+            .item_detail(&row.id)
+            .unwrap()
+            .fields
+            .volume
+            .as_deref(),
+        Some("521")
+    );
+}
+
+#[test]
+fn closing_does_not_wait_for_the_network_and_silences_the_observer() {
+    let h = harness();
+    h.http.hold();
+    let result = thread::scope(|scope| {
+        let adding = scope.spawn(|| block_on(h.engine.add_by_identifier("10.1038/nature14539")));
+        h.http.wait_for_held_request();
+        h.events.take();
+
+        let started = Instant::now();
+        h.engine.close();
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "close blocked for {:?} on a lookup that was waiting on the network",
+            started.elapsed()
+        );
+        assert_eq!(
+            h.engine.list_items(&ItemQuery::default()),
+            Err(PaperError::Closed)
+        );
+
+        h.http.release();
+        adding.join().unwrap()
+    });
+    assert_eq!(
+        result.map(|row| row.title),
+        Ok("Deep learning".to_string()),
+        "the lookup that was already running finishes"
+    );
+    assert!(
+        h.events.take().is_empty(),
+        "nothing reaches the observer after close"
+    );
+}
+
+#[test]
+fn a_read_only_settings_directory_does_not_keep_the_library_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let not_a_dir = dir.path().join("settings");
+    std::fs::write(&not_a_dir, b"a file where the settings folder should be").unwrap();
+    let engine = Engine::create_library_with(
+        dir.path().join("Library"),
+        EngineOptions {
+            settings_dir: Some(not_a_dir.clone()),
+            http: Some(Arc::new(FakeHttp::new())),
+        },
+    )
+    .expect("the library opens even if the recent list cannot be written");
+    assert_eq!(engine.collection_tree().unwrap(), []);
+    assert!(
+        paper_engine::recent_libraries_in(&not_a_dir).is_empty(),
+        "nothing was written"
+    );
+    assert!(matches!(
+        engine.update_settings(engine.settings()),
+        Err(PaperError::Settings { .. }) | Err(PaperError::Io { .. })
+    ));
+}
+
+#[test]
+fn retry_prefers_the_journal_doi_over_the_arxiv_id() {
+    let h = harness();
+    let attention = block_on(h.engine.add_by_identifier("arXiv:1706.03762v7")).unwrap();
+    let again = block_on(h.engine.retry_lookup(&attention.id)).unwrap();
+    assert_eq!(
+        h.engine
+            .item_detail(&again.id)
+            .unwrap()
+            .fields
+            .arxiv_id
+            .as_deref(),
+        Some("1706.03762v7"),
+        "with only the DataCite DOI, the retry goes by the arXiv ID the user typed"
+    );
+
+    let published = MetadataPatch {
+        doi: Some("10.1038/nature14539".into()),
+        ..MetadataPatch::default()
+    };
+    h.engine.update_metadata(&attention.id, &published).unwrap();
+    let row = block_on(h.engine.retry_lookup(&attention.id)).unwrap();
+    assert_eq!(row.id, attention.id);
+    assert_eq!(
+        row.title, "Deep learning",
+        "the journal DOI the user set wins"
+    );
+    assert_eq!(row.doi.as_deref(), Some("10.1038/nature14539"));
+}
+
+#[test]
+fn arxiv_dois_typed_as_dois_still_make_preprints() {
+    let h = harness();
+    h.http.fail_with("offline");
+    let _ = block_on(h.engine.add_by_identifier("10.48550/arxiv.1706.03762"));
+    let placeholder = h
+        .engine
+        .list_items(&ItemQuery::default())
+        .unwrap()
+        .remove(0);
+    assert_eq!(placeholder.kind, ItemKind::Preprint);
+    assert_eq!(placeholder.lookup_status, LookupStatus::Failed);
 }
 
 #[test]
@@ -344,6 +571,30 @@ fn edited_dois_are_normalized_and_the_rest_of_the_api_round_trips() {
     };
     h.engine.update_metadata(&deep.id, &clear).unwrap();
     assert_eq!(h.engine.item_detail(&deep.id).unwrap().fields.doi, None);
+
+    let arxiv = MetadataPatch {
+        arxiv_id: Some("arXiv:1706.03762v2".into()),
+        ..MetadataPatch::default()
+    };
+    h.engine.update_metadata(&deep.id, &arxiv).unwrap();
+    assert_eq!(
+        h.engine
+            .item_detail(&deep.id)
+            .unwrap()
+            .fields
+            .arxiv_id
+            .as_deref(),
+        Some("1706.03762v2"),
+        "an edited arXiv ID is normalized like a typed one"
+    );
+    let bad_arxiv = MetadataPatch {
+        arxiv_id: Some("not an arxiv id".into()),
+        ..MetadataPatch::default()
+    };
+    assert!(matches!(
+        h.engine.update_metadata(&deep.id, &bad_arxiv),
+        Err(PaperError::InvalidIdentifier { .. })
+    ));
 
     let parent = h.engine.create_collection("Parent", None).unwrap();
     let child = h.engine.create_collection("Child", Some(&parent)).unwrap();
