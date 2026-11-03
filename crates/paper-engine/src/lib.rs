@@ -566,6 +566,13 @@ impl LookupJob {
     }
 }
 
+/// The canonical form of user input that `add_by_identifier` accepts
+/// (`10.1038/nature14539` or `arXiv:1706.03762`), or `None` when the text is
+/// neither a DOI nor an arXiv ID and should be treated as a search.
+pub fn parse_identifier(text: &str) -> Option<String> {
+    Identifier::parse(text).map(|identifier| identifier.to_string())
+}
+
 /// Whether the folder holds a Paper library (`library.db`).
 pub fn is_library(path: impl AsRef<Path>) -> bool {
     Library::is_library(path)

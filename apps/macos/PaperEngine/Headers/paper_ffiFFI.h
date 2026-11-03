@@ -473,6 +473,11 @@ void uniffi_paper_ffi_fn_method_engineobserver_lookup_progress(uint64_t ptr, Rus
 int8_t uniffi_paper_ffi_fn_func_is_library(RustBuffer path, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_FUNC_PARSE_IDENTIFIER
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_FUNC_PARSE_IDENTIFIER
+RustBuffer uniffi_paper_ffi_fn_func_parse_identifier(RustBuffer text, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_FUNC_RECENT_LIBRARIES
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_FUNC_RECENT_LIBRARIES
 RustBuffer uniffi_paper_ffi_fn_func_recent_libraries(RustCallStatus *_Nonnull out_status
@@ -748,6 +753,12 @@ void ffi_paper_ffi_rust_future_complete_void(uint64_t handle, RustCallStatus *_N
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_FUNC_IS_LIBRARY
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_FUNC_IS_LIBRARY
 uint16_t uniffi_paper_ffi_checksum_func_is_library(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_FUNC_PARSE_IDENTIFIER
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_FUNC_PARSE_IDENTIFIER
+uint16_t uniffi_paper_ffi_checksum_func_parse_identifier(void
     
 );
 #endif

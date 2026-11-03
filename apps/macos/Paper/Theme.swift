@@ -1,49 +1,139 @@
 import AppKit
+import SwiftUI
 
-/// Every size, color, and font the views use, from docs/UI.md.
+/// Every size, color, font, and duration the views use, defined once.
+///
+/// Colors are the system's semantic colors, so the app follows Light and Dark
+/// Mode and the user's accent color like any first party Mac app. Titles use
+/// the system serif design (New York); everything else is San Francisco.
 @MainActor
 enum Theme {
-    enum Color {
-        static let canvas = NSColor(hex: 0xFBFAF7)
-        static let panel = NSColor(hex: 0xFFFFFF)
-        static let border = NSColor(hex: 0xE6E2DB)
-        static let textPrimary = NSColor(hex: 0x1E1D1A)
-        static let textSecondary = NSColor(hex: 0x5F5B54)
-        static let textMuted = NSColor(hex: 0x8E8A82)
-        static let accent = NSColor(hex: 0x2F4A7A)
-        static let danger = NSColor(hex: 0xB4473A)
-    }
-
     enum Size {
+        static let windowWidth: CGFloat = 1180
+        static let windowHeight: CGFloat = 760
+        static let windowMinWidth: CGFloat = 760
+        static let windowMinHeight: CGFloat = 440
+
+        static let sidebarWidth: CGFloat = 220
+        static let sidebarMinWidth: CGFloat = 180
+        static let sidebarMaxWidth: CGFloat = 320
+        static let inspectorWidth: CGFloat = 340
+        static let inspectorMinWidth: CGFloat = 280
+        static let inspectorMaxWidth: CGFloat = 520
+        static let listMinWidth: CGFloat = 320
+        /// Fits beside the inspector toggle at the minimum inspector width, so
+        /// focusing the field never pushes the toggle into the overflow menu.
+        static let searchFieldWidth: CGFloat = 220
+
         static let padding: CGFloat = 16
         static let gap: CGFloat = 8
-        static let toolbarHeight: CGFloat = 52
-        static let statusBarHeight: CGFloat = 28
-        static let rowHeight: CGFloat = 44
-        static let titleColumnMinWidth: CGFloat = 320
-        static let authorsColumnWidth: CGFloat = 200
-        static let yearColumnWidth: CGFloat = 64
-        static let windowWidth: CGFloat = 1100
-        static let windowHeight: CGFloat = 720
+        static let smallGap: CGFloat = 4
+        static let iconSize: CGFloat = 16
+
+        /// Two line paper rows: title and metadata.
+        static let rowHeight: CGFloat = 52
+        static let rowInset: CGFloat = 12
+        static let rowTrailingWidth: CGFloat = 56
+        static let statusIndicatorSize: CGFloat = 14
+        static let sidebarRowHeight: CGFloat = 28
+        static let sidebarGroupHeight: CGFloat = 24
+        static let sidebarBadgeMinWidth: CGFloat = 20
+        static let sidebarFooterHeight: CGFloat = 36
+        static let tagDotSize: CGFloat = 10
+
+        static let popoverWidth: CGFloat = 360
+        static let welcomeWidth: CGFloat = 520
+        static let welcomeHeight: CGFloat = 420
+        static let settingsWidth: CGFloat = 460
+        static let chipRadius: CGFloat = 6
+        static let cardRadius: CGFloat = 8
+        static let noteMinHeight: CGFloat = 120
     }
 
-    /// Source Serif 4 and Inter are not bundled yet, so these fall back to the system font.
-    /// `NSFont` is not `Sendable`, and `@MainActor` on `Theme` does not reach nested types.
-    @MainActor
-    enum Font {
-        static let title = NSFont(name: "Source Serif 4", size: 15) ?? .systemFont(ofSize: 15)
-        static let body = NSFont(name: "Inter", size: 13) ?? .systemFont(ofSize: 13)
-        static let muted = NSFont(name: "Inter", size: 12) ?? .systemFont(ofSize: 12)
-    }
-}
+    @MainActor enum Color {
+        static let text = NSColor.labelColor
+        static let secondaryText = NSColor.secondaryLabelColor
+        static let tertiaryText = NSColor.tertiaryLabelColor
+        static let selectedText = NSColor.alternateSelectedControlTextColor
+        static let accent = NSColor.controlAccentColor
+        static let separator = NSColor.separatorColor
+        static let listBackground = NSColor.controlBackgroundColor
+        static let inspectorBackground = NSColor.windowBackgroundColor
+        static let warning = NSColor.systemOrange
+        static let danger = NSColor.systemRed
+        /// The tag color when the user never picked one.
+        static let defaultTag = NSColor.systemGray
 
-private extension NSColor {
-    convenience init(hex: UInt32) {
-        self.init(
-            srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
-            green: CGFloat((hex >> 8) & 0xFF) / 255,
-            blue: CGFloat(hex & 0xFF) / 255,
-            alpha: 1
-        )
+        static let swiftUIText = SwiftUI.Color(nsColor: text)
+        static let swiftUISecondaryText = SwiftUI.Color(nsColor: secondaryText)
+        static let swiftUITertiaryText = SwiftUI.Color(nsColor: tertiaryText)
+        static let swiftUIAccent = SwiftUI.Color.accentColor
+        static let swiftUIWarning = SwiftUI.Color(nsColor: warning)
+        static let swiftUIDanger = SwiftUI.Color(nsColor: danger)
+        static let swiftUICard = SwiftUI.Color(nsColor: .quaternarySystemFill)
+        static let swiftUISeparator = SwiftUI.Color(nsColor: separator)
+    }
+
+    @MainActor enum Font {
+        /// Paper titles in the list.
+        static let rowTitle = serif(size: 15, weight: .regular)
+        /// The selected paper's title in the inspector.
+        static let inspectorTitle = serif(size: 20, weight: .semibold)
+        static let body = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        static let secondary = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        static let caption = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize - 1, weight: .medium)
+        static let sidebar = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        static let sidebarBadge = NSFont.monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
+        static let monospaced = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+
+        static let swiftUIInspectorTitle = SwiftUI.Font.system(size: 20, weight: .semibold, design: .serif)
+        static let swiftUIBody = SwiftUI.Font.body
+        static let swiftUISecondary = SwiftUI.Font.callout
+        static let swiftUICaption = SwiftUI.Font.caption
+        static let swiftUISectionLabel = SwiftUI.Font.caption.weight(.semibold)
+        static let swiftUIWelcomeTitle = SwiftUI.Font.system(size: 28, weight: .semibold, design: .serif)
+
+        private static func serif(size: CGFloat, weight: NSFont.Weight) -> NSFont {
+            let base = NSFont.systemFont(ofSize: size, weight: weight)
+            guard let descriptor = base.fontDescriptor.withDesign(.serif),
+                  let font = NSFont(descriptor: descriptor, size: size)
+            else { return base }
+            return font
+        }
+    }
+
+    enum Duration {
+        /// Panels opening and closing.
+        static let panel: TimeInterval = 0.15
+        /// How long an informational notice stays before it fades.
+        static let notice: TimeInterval = 6
+        /// Keystrokes to wait before the note is saved.
+        static let noteAutosave: TimeInterval = 0.8
+    }
+
+    enum Symbol {
+        static let allPapers = "books.vertical"
+        static let unread = "circle"
+        static let recentlyAdded = "clock"
+        static let noPdf = "doc.questionmark"
+        static let collection = "folder"
+        static let tag = "tag"
+        static let addPaper = "plus"
+        static let sort = "arrow.up.arrow.down"
+        static let inspector = "sidebar.trailing"
+        static let newCollection = "folder.badge.plus"
+        static let pdf = "doc.richtext"
+        static let failed = "exclamationmark.triangle.fill"
+        static let more = "ellipsis.circle"
+        static let link = "arrow.up.right.square"
+        static let copy = "doc.on.doc"
+        static let retry = "arrow.clockwise"
+        static let library = "building.columns"
+        static let openLibrary = "folder"
+        static let newLibrary = "plus.rectangle.on.folder"
+        static let close = "xmark"
+        static let paper = "doc.text"
+        static let edit = "pencil"
+        static let delete = "trash"
     }
 }

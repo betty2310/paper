@@ -1,0 +1,564 @@
+import AppKit
+import PaperEngine
+import SwiftUI
+
+/// Hosts the SwiftUI inspector in the right split view item.
+@MainActor
+final class InspectorViewController: NSViewController {
+    let store: LibraryStore
+
+    init(store: LibraryStore) {
+        self.store = store
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func loadView() {
+        let host = NSHostingView(rootView: InspectorView(store: store))
+        // The split view item sizes this pane; SwiftUI's own size constraints
+        // would otherwise pull the window and the other panes around.
+        host.sizingOptions = []
+        host.setFrameSize(NSSize(width: Theme.Size.inspectorWidth, height: Theme.Size.windowHeight))
+        view = host
+    }
+}
+
+/// The selected paper: title, people, venue, identifiers, abstract, tags,
+/// collections, and the note. Nothing here calls the engine directly.
+struct InspectorView: View {
+    @ObservedObject var store: LibraryStore
+
+    var body: some View {
+        Group {
+            if let detail = store.detail {
+                ItemDetailView(store: store, detail: detail)
+                    .id(detail.id)
+            } else if store.selectedItemIds.count > 1 {
+                MultipleSelectionView(store: store)
+            } else {
+                NoSelectionView()
+            }
+        }
+        .frame(minWidth: Theme.Size.inspectorMinWidth, maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: Theme.Color.inspectorBackground))
+    }
+}
+
+struct NoSelectionView: View {
+    var body: some View {
+        VStack(spacing: Theme.Size.gap) {
+            Image(systemName: Theme.Symbol.paper)
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(Theme.Color.swiftUITertiaryText)
+            Text("Select a paper to see its details.")
+                .font(Theme.Font.swiftUISecondary)
+                .foregroundStyle(Theme.Color.swiftUISecondaryText)
+        }
+        .padding(Theme.Size.padding)
+    }
+}
+
+struct MultipleSelectionView: View {
+    @ObservedObject var store: LibraryStore
+
+    var body: some View {
+        VStack(spacing: Theme.Size.gap) {
+            Image(systemName: "doc.on.doc")
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(Theme.Color.swiftUITertiaryText)
+            Text("\(store.selectedItemIds.count) papers selected")
+                .font(Theme.Font.swiftUIBody)
+                .foregroundStyle(Theme.Color.swiftUIText)
+            Text("Drag them onto a collection, or use the context menu.")
+                .font(Theme.Font.swiftUISecondary)
+                .foregroundStyle(Theme.Color.swiftUISecondaryText)
+                .multilineTextAlignment(.center)
+            Button("Delete", role: .destructive) {
+                store.delete(itemIds: store.selectedItemIds)
+            }
+            .padding(.top, Theme.Size.gap)
+        }
+        .padding(Theme.Size.padding)
+    }
+}
+
+struct ItemDetailView: View {
+    @ObservedObject var store: LibraryStore
+    let detail: ItemDetail
+    @State private var showEditor = false
+    @State private var newTag = ""
+    @State private var note: String
+    @State private var abstractExpanded = false
+
+    init(store: LibraryStore, detail: ItemDetail) {
+        self.store = store
+        self.detail = detail
+        _note = State(initialValue: detail.note ?? "")
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Size.padding) {
+                header
+                if detail.lookupStatus == .pending {
+                    lookupPending
+                } else if detail.lookupStatus == .failed {
+                    lookupFailed
+                }
+                actions
+                if let abstractText = detail.fields.abstractText, !abstractText.isEmpty {
+                    section("Abstract") {
+                        Text(abstractText)
+                            .font(Theme.Font.swiftUIBody)
+                            .foregroundStyle(Theme.Color.swiftUIText)
+                            .lineLimit(abstractExpanded ? nil : 6)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button(abstractExpanded ? "Show Less" : "Show More") { abstractExpanded.toggle() }
+                            .buttonStyle(.link)
+                            .font(Theme.Font.swiftUISecondary)
+                    }
+                }
+                section("Tags") { tags }
+                section("Collections") { collections }
+                section("Notes") { notes }
+                section("Details") { details }
+            }
+            .padding(Theme.Size.padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .sheet(isPresented: $showEditor) {
+            MetadataEditor(detail: detail) { patch in
+                store.updateMetadata(itemId: detail.id, patch: patch)
+            }
+        }
+    }
+
+    // MARK: Header
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: Theme.Size.gap) {
+            Text(detail.fields.kind?.label ?? ItemKind.other.label)
+                .font(Theme.Font.swiftUISectionLabel)
+                .foregroundStyle(Theme.Color.swiftUITertiaryText)
+                .textCase(.uppercase)
+            Text(detail.fields.title)
+                .font(Theme.Font.swiftUIInspectorTitle)
+                .foregroundStyle(Theme.Color.swiftUIText)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            if !detail.authorsLine.isEmpty {
+                Text(detail.authorsLine)
+                    .font(Theme.Font.swiftUIBody)
+                    .foregroundStyle(Theme.Color.swiftUIText)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !detail.venueLine.isEmpty {
+                Text(detail.venueLine)
+                    .font(Theme.Font.swiftUISecondary)
+                    .foregroundStyle(Theme.Color.swiftUISecondaryText)
+                    .textSelection(.enabled)
+            }
+            if let doi = detail.fields.doi, let url = URL(string: "https://doi.org/\(doi)") {
+                Link(destination: url) {
+                    HStack(spacing: Theme.Size.smallGap) {
+                        Text(doi)
+                        Image(systemName: Theme.Symbol.link)
+                    }
+                    .font(Theme.Font.swiftUISecondary)
+                }
+                .help("Open on doi.org")
+            }
+            if let arxiv = detail.fields.arxivId, let url = URL(string: "https://arxiv.org/abs/\(arxiv)") {
+                Link(destination: url) {
+                    HStack(spacing: Theme.Size.smallGap) {
+                        Text("arXiv:\(arxiv)")
+                        Image(systemName: Theme.Symbol.link)
+                    }
+                    .font(Theme.Font.swiftUISecondary)
+                }
+            }
+        }
+    }
+
+    private var lookupPending: some View {
+        HStack(spacing: Theme.Size.gap) {
+            ProgressView().controlSize(.small)
+            Text("Looking up metadata…")
+                .font(Theme.Font.swiftUISecondary)
+                .foregroundStyle(Theme.Color.swiftUISecondaryText)
+        }
+    }
+
+    private var lookupFailed: some View {
+        HStack(spacing: Theme.Size.gap) {
+            Image(systemName: Theme.Symbol.failed)
+                .foregroundStyle(Theme.Color.swiftUIWarning)
+            Text("The metadata lookup failed.")
+                .font(Theme.Font.swiftUISecondary)
+                .foregroundStyle(Theme.Color.swiftUISecondaryText)
+            Spacer()
+            Button("Retry") { store.retryLookup(itemId: detail.id) }
+                .controlSize(.small)
+        }
+        .padding(Theme.Size.gap + Theme.Size.smallGap)
+        .background(Theme.Color.swiftUICard, in: RoundedRectangle(cornerRadius: Theme.Size.cardRadius, style: .continuous))
+    }
+
+    private var actions: some View {
+        HStack(spacing: Theme.Size.gap) {
+            if let doi = detail.fields.doi {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(doi, forType: .string)
+                    store.show(.init(kind: .info, message: "DOI copied.", actionTitle: nil, action: nil))
+                } label: {
+                    Label("Copy DOI", systemImage: Theme.Symbol.copy)
+                }
+                .help("Copy the DOI to the clipboard")
+            }
+            Button {
+                showEditor = true
+            } label: {
+                Label("Edit", systemImage: Theme.Symbol.edit)
+            }
+            .help("Edit the metadata")
+            Spacer()
+            Menu {
+                if let url = detail.fields.url.flatMap(URL.init(string:)) {
+                    Button("Open Publisher Page") { NSWorkspace.shared.open(url) }
+                }
+                Button("Retry Lookup") { store.retryLookup(itemId: detail.id) }
+                    .disabled(detail.lookupStatus == .pending)
+                Divider()
+                Button("Delete", role: .destructive) { store.delete(itemIds: [detail.id]) }
+            } label: {
+                Image(systemName: Theme.Symbol.more)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel("More actions")
+        }
+        .controlSize(.regular)
+    }
+
+    // MARK: Sections
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Size.gap) {
+            Divider()
+            Text(title)
+                .font(Theme.Font.swiftUISectionLabel)
+                .foregroundStyle(Theme.Color.swiftUITertiaryText)
+                .textCase(.uppercase)
+                .padding(.top, Theme.Size.smallGap)
+            content()
+        }
+    }
+
+    private var tags: some View {
+        FlowLayout(spacing: Theme.Size.gap - Theme.Size.smallGap) {
+            ForEach(detail.tags, id: \.id) { tag in
+                TagChip(tag: tag) {
+                    store.setTags(itemId: detail.id, names: detail.tags.filter { $0.id != tag.id }.map(\.name))
+                }
+            }
+            TextField("Add tag", text: $newTag)
+                .textFieldStyle(.plain)
+                .font(Theme.Font.swiftUISecondary)
+                .frame(minWidth: 72, maxWidth: 140)
+                .padding(.horizontal, Theme.Size.gap)
+                .padding(.vertical, Theme.Size.smallGap)
+                .background(Theme.Color.swiftUICard, in: RoundedRectangle(cornerRadius: Theme.Size.chipRadius, style: .continuous))
+                .onSubmit {
+                    let name = newTag.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !name.isEmpty else { return }
+                    store.setTags(itemId: detail.id, names: detail.tags.map(\.name) + [name])
+                    newTag = ""
+                }
+        }
+    }
+
+    private var collections: some View {
+        VStack(alignment: .leading, spacing: Theme.Size.smallGap) {
+            let member = store.collections.filter { detail.collectionIds.contains($0.id) }
+            ForEach(member, id: \.id) { collection in
+                HStack(spacing: Theme.Size.gap) {
+                    Image(systemName: Theme.Symbol.collection)
+                        .foregroundStyle(Theme.Color.swiftUIAccent)
+                    Text(collection.name)
+                        .font(Theme.Font.swiftUIBody)
+                    Spacer()
+                    Button {
+                        store.removeFromCollection(collectionId: collection.id, itemIds: [detail.id])
+                    } label: {
+                        Image(systemName: Theme.Symbol.close)
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .foregroundStyle(Theme.Color.swiftUISecondaryText)
+                    .accessibilityLabel("Remove from \(collection.name)")
+                }
+            }
+            let others = store.collections.filter { !detail.collectionIds.contains($0.id) }
+            if !others.isEmpty {
+                Menu {
+                    ForEach(others, id: \.id) { collection in
+                        Button(String(repeating: "    ", count: Int(collection.depth)) + collection.name) {
+                            store.addToCollection(collectionId: collection.id, itemIds: [detail.id])
+                        }
+                    }
+                } label: {
+                    Label("Add to Collection", systemImage: Theme.Symbol.addPaper)
+                        .font(Theme.Font.swiftUISecondary)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            } else if member.isEmpty {
+                Text("No collections yet.")
+                    .font(Theme.Font.swiftUISecondary)
+                    .foregroundStyle(Theme.Color.swiftUISecondaryText)
+            }
+        }
+    }
+
+    private var notes: some View {
+        ZStack(alignment: .topLeading) {
+            if note.isEmpty {
+                Text("Write a note in Markdown…")
+                    .font(Theme.Font.swiftUIBody)
+                    .foregroundStyle(Theme.Color.swiftUITertiaryText)
+                    .padding(.horizontal, Theme.Size.gap + 1)
+                    .padding(.vertical, Theme.Size.gap)
+                    .allowsHitTesting(false)
+            }
+            TextEditor(text: $note)
+                .font(Theme.Font.swiftUIBody)
+                .scrollContentBackground(.hidden)
+                .padding(Theme.Size.smallGap)
+                .frame(minHeight: Theme.Size.noteMinHeight)
+                .onChange(of: note) { _, text in
+                    store.scheduleNoteSave(itemId: detail.id, markdown: text)
+                }
+        }
+        .background(Theme.Color.swiftUICard, in: RoundedRectangle(cornerRadius: Theme.Size.cardRadius, style: .continuous))
+    }
+
+    private var details: some View {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Theme.Size.padding, verticalSpacing: Theme.Size.smallGap) {
+            detailRow("Venue", detail.fields.containerTitle)
+            detailRow("Publisher", detail.fields.publisher)
+            detailRow("Published", detail.fields.publishedDate)
+            detailRow("ISSN", detail.fields.issn)
+            detailRow("Language", detail.fields.language)
+            detailRow("Added", Self.dateFormatter.string(from: detail.addedAt))
+            detailRow("Modified", Self.dateFormatter.string(from: detail.modifiedAt))
+        }
+    }
+
+    @ViewBuilder
+    private func detailRow(_ label: String, _ value: String?) -> some View {
+        if let value, !value.isEmpty {
+            GridRow {
+                Text(label)
+                    .font(Theme.Font.swiftUISecondary)
+                    .foregroundStyle(Theme.Color.swiftUISecondaryText)
+                    .gridColumnAlignment(.trailing)
+                Text(value)
+                    .font(Theme.Font.swiftUISecondary)
+                    .foregroundStyle(Theme.Color.swiftUIText)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+}
+
+struct TagChip: View {
+    let tag: Tag
+    let remove: () -> Void
+
+    var body: some View {
+        HStack(spacing: Theme.Size.smallGap) {
+            Circle()
+                .fill(Color(nsColor: NSColor(hexString: tag.color) ?? Theme.Color.defaultTag))
+                .frame(width: Theme.Size.tagDotSize - 2, height: Theme.Size.tagDotSize - 2)
+            Text(tag.name)
+                .font(Theme.Font.swiftUISecondary)
+            Button(action: remove) {
+                Image(systemName: Theme.Symbol.close)
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(Theme.Color.swiftUISecondaryText)
+            .accessibilityLabel("Remove tag \(tag.name)")
+        }
+        .padding(.horizontal, Theme.Size.gap)
+        .padding(.vertical, Theme.Size.smallGap)
+        .background(Theme.Color.swiftUICard, in: Capsule())
+    }
+}
+
+/// Wraps chips onto as many lines as they need.
+struct FlowLayout: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        return place(in: width, subviews: subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = place(in: bounds.width, subviews: subviews)
+        for (index, origin) in result.origins.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y), proposal: .unspecified)
+        }
+    }
+
+    private func place(in width: CGFloat, subviews: Subviews) -> (size: CGSize, origins: [CGPoint]) {
+        var origins: [CGPoint] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        var maxX: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width {
+                x = 0
+                y += lineHeight + spacing
+                lineHeight = 0
+            }
+            origins.append(CGPoint(x: x, y: y))
+            x += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+            maxX = max(maxX, x - spacing)
+        }
+        return (CGSize(width: maxX, height: y + lineHeight), origins)
+    }
+}
+
+/// Edits the fields the user can change. Saves one `MetadataPatch`.
+struct MetadataEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    let detail: ItemDetail
+    let save: (MetadataPatch) -> Void
+
+    @State private var title: String
+    @State private var authors: String
+    @State private var container: String
+    @State private var containerShort: String
+    @State private var year: String
+    @State private var volume: String
+    @State private var issue: String
+    @State private var pages: String
+    @State private var doi: String
+    @State private var arxivId: String
+    @State private var url: String
+    @State private var kind: ItemKind
+
+    init(detail: ItemDetail, save: @escaping (MetadataPatch) -> Void) {
+        self.detail = detail
+        self.save = save
+        let fields = detail.fields
+        _title = State(initialValue: fields.title)
+        _authors = State(initialValue: fields.creators.map(\.displayName).joined(separator: "\n"))
+        _container = State(initialValue: fields.containerTitle ?? "")
+        _containerShort = State(initialValue: fields.containerShort ?? "")
+        _year = State(initialValue: fields.year.map(String.init) ?? "")
+        _volume = State(initialValue: fields.volume ?? "")
+        _issue = State(initialValue: fields.issue ?? "")
+        _pages = State(initialValue: fields.pages ?? "")
+        _doi = State(initialValue: fields.doi ?? "")
+        _arxivId = State(initialValue: fields.arxivId ?? "")
+        _url = State(initialValue: fields.url ?? "")
+        _kind = State(initialValue: fields.kind ?? .other)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    TextField("Title", text: $title, axis: .vertical)
+                        .lineLimit(1...4)
+                    Picker("Type", selection: $kind) {
+                        ForEach([ItemKind.journalArticle, .conferencePaper, .preprint, .other], id: \.self) { kind in
+                            Text(kind.label).tag(kind)
+                        }
+                    }
+                    TextField("Authors", text: $authors, prompt: Text("One per line, given name first"), axis: .vertical)
+                        .lineLimit(2...8)
+                }
+                Section("Venue") {
+                    TextField("Journal or proceedings", text: $container)
+                    TextField("Short name", text: $containerShort)
+                    HStack {
+                        TextField("Year", text: $year)
+                        TextField("Volume", text: $volume)
+                        TextField("Issue", text: $issue)
+                        TextField("Pages", text: $pages)
+                    }
+                }
+                Section("Identifiers") {
+                    TextField("DOI", text: $doi)
+                    TextField("arXiv ID", text: $arxivId)
+                    TextField("URL", text: $url)
+                }
+            }
+            .formStyle(.grouped)
+            Divider()
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    save(patch)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding(Theme.Size.padding)
+        }
+        .frame(width: Theme.Size.settingsWidth + 60, height: 560)
+    }
+
+    private var patch: MetadataPatch {
+        let creators = authors
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .map { name -> Creator in
+                var parts = name.split(separator: " ").map(String.init)
+                let family = parts.popLast()
+                return Creator(role: .author, family: family, given: parts.isEmpty ? nil : parts.joined(separator: " "), literal: nil, orcid: nil)
+            }
+        return MetadataPatch(
+            kind: kind,
+            doi: doi.trimmingCharacters(in: .whitespaces),
+            arxivId: arxivId.trimmingCharacters(in: .whitespaces),
+            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+            creators: creators,
+            containerTitle: container,
+            containerShort: containerShort,
+            publisher: nil,
+            year: Int32(year.trimmingCharacters(in: .whitespaces)),
+            publishedDate: nil,
+            volume: volume,
+            issue: issue,
+            pages: pages,
+            abstractText: nil,
+            url: url
+        )
+    }
+}

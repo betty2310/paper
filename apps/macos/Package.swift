@@ -6,7 +6,7 @@ import PackageDescription
 
 let package = Package(
     name: "Paper",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v14)],
     dependencies: [
         .package(path: "PaperEngine"),
     ],

@@ -268,6 +268,12 @@ impl engine::EngineObserver for ObserverAdapter {
 
 // ----- free functions -----
 
+/// The canonical DOI or arXiv ID in `text`, or `None` when it is neither.
+#[uniffi::export]
+pub fn parse_identifier(text: String) -> Option<String> {
+    engine::parse_identifier(&text)
+}
+
 /// Whether the folder holds a Paper library.
 #[uniffi::export]
 pub fn is_library(path: String) -> bool {

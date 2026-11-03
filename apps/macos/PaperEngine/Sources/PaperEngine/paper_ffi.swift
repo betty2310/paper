@@ -3196,6 +3196,17 @@ public func isLibrary(path: String) -> Bool  {
 })
 }
 /**
+ * The canonical DOI or arXiv ID in `text`, or `None` when it is neither.
+ */
+public func parseIdentifier(text: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_func_parse_identifier(
+        FfiConverterString.lower(text),uniffiCallStatus
+    )
+})
+}
+/**
  * Libraries opened on this machine that still exist, most recent first.
  */
 public func recentLibraries() -> [String]  {
@@ -3232,6 +3243,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.contractVersionMismatch
     }
     if (uniffi_paper_ffi_checksum_func_is_library() != 30511) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paper_ffi_checksum_func_parse_identifier() != 16342) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_func_recent_libraries() != 9984) {
