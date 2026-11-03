@@ -28,6 +28,7 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
     let tableView = PaperTableView()
     private let scrollView = NSScrollView()
     private var emptyStateHost: NSHostingView<EmptyStateView>!
+    private var filterHost: NSHostingView<FilterBar>!
     private var noticeHost: NSHostingView<NoticeBar>!
     private var noticeBottomConstraint: NSLayoutConstraint!
     private var subscriptions: Set<AnyCancellable> = []
@@ -69,22 +70,27 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
 
         emptyStateHost = NSHostingView(rootView: EmptyStateView(store: store))
         emptyStateHost.isHidden = true
+        filterHost = NSHostingView(rootView: FilterBar(store: store))
         noticeHost = NSHostingView(rootView: NoticeBar(store: store))
         // These hosts take their size from their content, but must never push
         // the list pane or the window around: the split view decides widths.
-        for host in [emptyStateHost, noticeHost] as [NSView] {
+        for host in [emptyStateHost, filterHost, noticeHost] as [NSView] {
             (host as? NSHostingView<EmptyStateView>)?.sizingOptions = .intrinsicContentSize
+            (host as? NSHostingView<FilterBar>)?.sizingOptions = .intrinsicContentSize
             (host as? NSHostingView<NoticeBar>)?.sizingOptions = .intrinsicContentSize
             host.setContentHuggingPriority(.init(1), for: .horizontal)
             host.setContentCompressionResistancePriority(.init(1), for: .horizontal)
         }
 
-        for subview in [scrollView, emptyStateHost, noticeHost] as [NSView] {
+        for subview in [filterHost, scrollView, emptyStateHost, noticeHost] as [NSView] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(subview)
         }
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: root.topAnchor),
+            filterHost.topAnchor.constraint(equalTo: root.topAnchor),
+            filterHost.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            filterHost.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: filterHost.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
@@ -432,6 +438,39 @@ struct EmptyStateView: View {
         case .noPdf: return "Papers without a PDF show up here."
         case .collection: return "Drag papers from the list onto this collection to add them."
         case .tag: return "Tag a paper in the inspector to see it here."
+        }
+    }
+}
+
+/// Names the search filter the palette applied to the list, with a way out.
+/// Renders nothing, and so takes no height, when the list is unfiltered.
+struct FilterBar: View {
+    @ObservedObject var store: LibraryStore
+
+    var body: some View {
+        if !store.searchText.isEmpty {
+            HStack(spacing: Theme.Size.gap) {
+                Image(systemName: Theme.Symbol.search)
+                    .foregroundStyle(Theme.Color.swiftUISecondaryText)
+                (Text("Results for ") + Text("“\(store.searchText)”").fontWeight(.semibold))
+                    .font(Theme.Font.swiftUISecondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Button {
+                    store.searchText = ""
+                } label: {
+                    Image(systemName: Theme.Symbol.clear)
+                        .foregroundStyle(Theme.Color.swiftUISecondaryText)
+                }
+                .buttonStyle(.plain)
+                .help("Clear the search filter")
+                .accessibilityLabel("Clear Search")
+            }
+            .padding(.horizontal, Theme.Size.padding)
+            .frame(height: Theme.Size.filterBarHeight)
+            .frame(maxWidth: .infinity)
+            .background(Color(nsColor: Theme.Color.inspectorBackground))
+            .overlay(alignment: .bottom) { Divider() }
         }
     }
 }

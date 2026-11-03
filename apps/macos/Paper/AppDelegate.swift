@@ -246,7 +246,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         editMenu.addItem(withTitle: "Delete", action: #selector(PaperListViewController.delete(_:)), keyEquivalent: "\u{8}")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(.separator())
-        editMenu.addItem(withTitle: "Find", action: #selector(MainWindowController.focusSearch(_:)), keyEquivalent: "f")
+        editMenu.addItem(withTitle: "Search Library…", action: #selector(MainWindowController.showSearch(_:)), keyEquivalent: "p")
+        // ⌘F is what Mac users reach for first; it opens the same palette
+        // without a second visible menu entry.
+        let find = editMenu.addItem(withTitle: "Find", action: #selector(MainWindowController.showSearch(_:)), keyEquivalent: "f")
+        find.isHidden = true
 
         let paperMenu = NSMenu(title: "Paper")
         paperMenu.addItem(withTitle: "Copy DOI", action: #selector(PaperListViewController.copyDOI(_:)), keyEquivalent: "")

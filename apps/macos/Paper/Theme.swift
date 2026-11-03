@@ -21,9 +21,19 @@ enum Theme {
         static let inspectorMinWidth: CGFloat = 280
         static let inspectorMaxWidth: CGFloat = 520
         static let listMinWidth: CGFloat = 320
-        /// Fits beside the inspector toggle at the minimum inspector width, so
-        /// focusing the field never pushes the toggle into the overflow menu.
-        static let searchFieldWidth: CGFloat = 220
+
+        /// The ⌘P search palette.
+        static let paletteWidth: CGFloat = 600
+        static let paletteFieldHeight: CGFloat = 56
+        static let paletteRowHeight: CGFloat = 48
+        static let paletteSectionHeight: CGFloat = 28
+        static let paletteVisibleRows = 8
+        static let paletteMaxResults = 30
+        static let paletteRadius: CGFloat = 12
+        /// Where the palette's top edge sits, as a fraction of the window height.
+        static let paletteTopFraction: CGFloat = 0.16
+        /// The strip above the list that names the active search filter.
+        static let filterBarHeight: CGFloat = 32
 
         static let padding: CGFloat = 16
         static let gap: CGFloat = 8
@@ -87,6 +97,8 @@ enum Theme {
         static let monospaced = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
 
         static let swiftUIInspectorTitle = SwiftUI.Font.system(size: 20, weight: .semibold, design: .serif)
+        static let swiftUIPaletteTitle = SwiftUI.Font.system(size: 15, weight: .regular, design: .serif)
+        static let swiftUIPaletteField = SwiftUI.Font.system(size: 20, weight: .regular)
         static let swiftUIBody = SwiftUI.Font.body
         static let swiftUISecondary = SwiftUI.Font.callout
         static let swiftUICaption = SwiftUI.Font.caption
@@ -135,5 +147,9 @@ enum Theme {
         static let paper = "doc.text"
         static let edit = "pencil"
         static let delete = "trash"
+        static let search = "magnifyingglass"
+        static let showInList = "list.bullet"
+        static let returnKey = "return"
+        static let clear = "xmark.circle.fill"
     }
 }

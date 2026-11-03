@@ -8,14 +8,14 @@ import SwiftUI
 /// responder chain so menu items, toolbar buttons, and SwiftUI buttons share
 /// one code path.
 @MainActor
-final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate, NSSearchFieldDelegate, NSMenuItemValidation {
+final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate, NSMenuItemValidation {
     let store: LibraryStore
     let splitViewController = NSSplitViewController()
     let sidebar: SidebarViewController
     let list: PaperListViewController
     let inspector: InspectorViewController
     private var inspectorItem: NSSplitViewItem!
-    private let searchField = NSSearchField()
+    private let searchPalette: SearchPaletteController
     private let addPopover = NSPopover()
     private var subscriptions: Set<AnyCancellable> = []
 
@@ -31,6 +31,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         sidebar = SidebarViewController(store: store)
         list = PaperListViewController(store: store)
         inspector = InspectorViewController(store: store)
+        searchPalette = SearchPaletteController(store: store)
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: Theme.Size.windowWidth, height: Theme.Size.windowHeight),
@@ -83,12 +84,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         toolbar.displayMode = .iconOnly
         toolbar.allowsUserCustomization = false
         window.toolbar = toolbar
-
-        searchField.placeholderString = "Search"
-        searchField.delegate = self
-        searchField.sendsSearchStringImmediately = true
-        searchField.target = self
-        searchField.action = #selector(searchChanged(_:))
 
         addPopover.behavior = .transient
         addPopover.contentViewController = NSHostingController(
@@ -151,8 +146,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         }
     }
 
-    @objc func focusSearch(_ sender: Any?) {
-        window?.makeFirstResponder(searchField)
+    @objc func showSearch(_ sender: Any?) {
+        guard let window else { return }
+        addPopover.performClose(nil)
+        searchPalette.toggle(over: window)
     }
 
     @objc func toggleSidebar(_ sender: Any?) {
@@ -207,28 +204,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         }
     }
 
-    // MARK: Search
-
-    @objc private func searchChanged(_ sender: NSSearchField) {
-        store.searchText = sender.stringValue
-    }
-
-    /// Enter in the search field with an identifier adds the paper instead of searching.
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        guard commandSelector == #selector(NSResponder.insertNewline(_:)),
-              let identifier = parseIdentifier(text: searchField.stringValue)
-        else { return false }
-        searchField.stringValue = ""
-        store.searchText = ""
-        store.add(identifier: identifier)
-        return true
-    }
-
     // MARK: Toolbar
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace, ToolbarID.sort, ToolbarID.add,
-         .inspectorTrackingSeparator, ToolbarID.search, ToolbarID.inspector]
+        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace, ToolbarID.search, ToolbarID.sort, ToolbarID.add,
+         .inspectorTrackingSeparator, .flexibleSpace, ToolbarID.inspector]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -256,10 +236,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             item.isBordered = true
             return item
         case ToolbarID.search:
-            let item = NSSearchToolbarItem(itemIdentifier: identifier)
-            item.searchField = searchField
+            let item = NSToolbarItem(itemIdentifier: identifier)
             item.label = "Search"
-            item.preferredWidthForSearchField = Theme.Size.searchFieldWidth
+            item.toolTip = "Search the whole library (⌘P)"
+            item.image = NSImage(systemSymbolName: Theme.Symbol.search, accessibilityDescription: "Search")
+            item.target = self
+            item.action = #selector(showSearch(_:))
+            item.isBordered = true
             return item
         case ToolbarID.inspector:
             let item = NSToolbarItem(itemIdentifier: identifier)

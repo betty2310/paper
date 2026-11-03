@@ -90,6 +90,23 @@ final class LibraryStore: ObservableObject {
         }
     }
 
+    /// Whole-library search for the palette, independent of the list's scope.
+    /// With no text it returns the most recently added papers.
+    func search(text: String, limit: Int) -> [ItemRow] {
+        let scope: Scope = text.isEmpty ? .recentlyAdded : .all
+        let query = ItemQuery(text: text, scope: scope, sort: .added, ascending: false)
+        var rows = (try? engine.listItems(query: query)) ?? []
+        if rows.isEmpty, text.isEmpty {
+            rows = (try? engine.listItems(query: ItemQuery(text: "", scope: .all, sort: .added, ascending: false))) ?? []
+        }
+        return Array(rows.prefix(limit))
+    }
+
+    func searchCount(text: String) -> Int {
+        let query = ItemQuery(text: text, scope: .all, sort: .added, ascending: false)
+        return (try? engine.listItems(query: query).count) ?? 0
+    }
+
     private func reloadCollections() {
         collections = (try? engine.collectionTree()) ?? []
     }
