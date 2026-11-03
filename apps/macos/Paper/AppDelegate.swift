@@ -22,6 +22,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
         }
         NSApp.mainMenu = makeMainMenu()
+        // Under `swift run` there is no Info.plist to name the icon, so the
+        // Dock, ⌘Tab, and the About panel take it from here. Paper.app names
+        // it with CFBundleIconFile.
+        if Bundle.main.object(forInfoDictionaryKey: "CFBundleIconFile") == nil,
+           let url = Bundle.module.url(forResource: "AppIcon", withExtension: "icns") {
+            NSApp.applicationIconImage = NSImage(contentsOf: url)
+        }
         NSApp.activate(ignoringOtherApps: true)
 
         // `swift run Paper <library>` or PAPER_LIBRARY=<library> opens that library
@@ -171,6 +178,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     // MARK: Settings
 
+    /// The standard panel reads its icon from the bundle, which a bare
+    /// executable lacks, so hand it the one set at launch.
+    @objc func showAbout(_ sender: Any?) {
+        var options: [NSApplication.AboutPanelOptionKey: Any] = [:]
+        if let icon = NSApp.applicationIconImage { options[.applicationIcon] = icon }
+        NSApp.orderFrontStandardAboutPanel(options: options)
+    }
+
     @objc func showSettings(_ sender: Any?) {
         guard let store = frontStore else { return }
         if settingsWindow == nil {
@@ -210,7 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let mainMenu = NSMenu()
 
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About Paper", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "About Paper", action: #selector(showAbout(_:)), keyEquivalent: "")
         if let updater {
             let checkItem = appMenu.addItem(withTitle: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "")
             checkItem.target = updater

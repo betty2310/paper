@@ -20,7 +20,8 @@ let package = Package(
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "Paper",
-            exclude: ["Info.plist"],
+            exclude: ["Info.plist", "Resources/AppIcon.iconset"],
+            resources: [.copy("Resources/AppIcon.icns")],
             // Inside Paper.app the executable is in Contents/MacOS and
             // Sparkle.framework in Contents/Frameworks.
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]

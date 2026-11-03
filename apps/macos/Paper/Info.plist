@@ -10,6 +10,8 @@
 	<string>Paper</string>
 	<key>CFBundleExecutable</key>
 	<string>Paper</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.betty2310.paper</string>
 	<key>CFBundleInfoDictionaryVersion</key>

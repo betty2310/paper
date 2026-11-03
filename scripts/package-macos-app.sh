@@ -34,7 +34,7 @@ scripts/build-xcframework.sh release
 # static PaperFFI.xcframework (library not found for -lpaper_ffi).
 # Copy each executable out: with Xcode 27 both builds share one output folder.
 rm -rf "$dist"
-mkdir -p "$app/Contents/MacOS" "$app/Contents/Frameworks"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Frameworks" "$app/Contents/Resources"
 for arch in arm64 x86_64; do
   build=(swift build --package-path "$package" -c release --triple "$arch-apple-macosx")
   "${build[@]}"
@@ -45,6 +45,10 @@ lipo -create "$dist"/Paper-{arm64,x86_64} -output "$app/Contents/MacOS/Paper"
 rm "$dist"/Paper-{arm64,x86_64}
 # Sparkle's framework is universal already; any build's copy will do.
 ditto "$bin/Sparkle.framework" "$app/Contents/Frameworks/Sparkle.framework"
+# The SwiftPM resource bundle, where Bundle.module looks first inside an app,
+# and the icon Finder reads through CFBundleIconFile.
+ditto "$bin/Paper_Paper.bundle" "$app/Contents/Resources/Paper_Paper.bundle"
+cp "$package/Paper/Resources/AppIcon.icns" "$app/Contents/Resources/AppIcon.icns"
 
 plist="$app/Contents/Info.plist"
 cp "$package/Paper/Info.plist" "$plist"
