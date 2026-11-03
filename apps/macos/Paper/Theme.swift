@@ -29,9 +29,14 @@ enum Theme {
         static let paletteSectionHeight: CGFloat = 28
         static let paletteVisibleRows = 8
         static let paletteMaxResults = 30
-        static let paletteRadius: CGFloat = 12
+        static let paletteRadius: CGFloat = 16
         /// Where the palette's top edge sits, as a fraction of the window height.
         static let paletteTopFraction: CGFloat = 0.16
+        /// Room for the selection bar before a row's text.
+        static let paletteRowInset: CGFloat = 24
+        static let paletteSelectionBar: CGFloat = 3
+        /// Key hints and the action badge in rows.
+        static let paletteBadgeSize: CGFloat = 20
         /// The strip above the list that names the active search filter.
         static let filterBarHeight: CGFloat = 32
 
@@ -82,6 +87,15 @@ enum Theme {
         static let swiftUIDanger = SwiftUI.Color(nsColor: danger)
         static let swiftUICard = SwiftUI.Color(nsColor: .quaternarySystemFill)
         static let swiftUISeparator = SwiftUI.Color(nsColor: separator)
+        /// Keeps text on the palette's glass readable over busy windows.
+        static let paletteTint = NSColor.windowBackgroundColor.withAlphaComponent(Opacity.glassTint)
+    }
+
+    /// Accent fills behind text: light enough that the text keeps its color.
+    enum Opacity {
+        static let tint: Double = 0.12
+        static let pressedTint: Double = 0.24
+        static let glassTint: Double = 0.6
     }
 
     @MainActor enum Font {
@@ -99,6 +113,7 @@ enum Theme {
         static let swiftUIInspectorTitle = SwiftUI.Font.system(size: 20, weight: .semibold, design: .serif)
         static let swiftUIPaletteTitle = SwiftUI.Font.system(size: 15, weight: .regular, design: .serif)
         static let swiftUIPaletteField = SwiftUI.Font.system(size: 20, weight: .regular)
+        static let swiftUIPaletteIcon = SwiftUI.Font.system(size: 18, weight: .medium)
         static let swiftUIBody = SwiftUI.Font.body
         static let swiftUISecondary = SwiftUI.Font.callout
         static let swiftUICaption = SwiftUI.Font.caption

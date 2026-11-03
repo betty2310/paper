@@ -25,31 +25,68 @@ final class SearchPaletteController: NSObject, NSWindowDelegate {
         super.init()
 
         host.sizingOptions = []
+        // The panel has no title bar; any safe area the window reports would
+        // push the content down and leave the window background showing.
+        host.safeAreaRegions = []
         model.onDismiss = { [weak self] in self?.dismiss() }
         model.onResize = { [weak self] size in
             self?.contentSize = size
-            self?.resize()
+            // SwiftUI reports the size from inside a layout pass. Resizing the
+            // window there lets the layout engine overwrite the content view's
+            // frame with a stale solution, so the content no longer fills the
+            // window. Resize once the pass is over.
+            DispatchQueue.main.async { self?.resize() }
         }
 
-        let background = NSVisualEffectView()
-        background.material = .popover
-        background.blendingMode = .behindWindow
-        background.state = .active
-        background.wantsLayer = true
-        background.layer?.cornerRadius = Theme.Size.paletteRadius
-        background.layer?.cornerCurve = .continuous
-        background.layer?.masksToBounds = true
-        background.addSubview(host)
-        host.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            host.topAnchor.constraint(equalTo: background.topAnchor),
-            host.leadingAnchor.constraint(equalTo: background.leadingAnchor),
-            host.trailingAnchor.constraint(equalTo: background.trailingAnchor),
-            host.bottomAnchor.constraint(equalTo: background.bottomAnchor),
-        ])
-        panel.contentView = background
+        // The window's own content view is a transparent, rounded clip. The
+        // material and the SwiftUI content sit inside it, so nothing the window
+        // draws itself can show around the panel's shape.
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.clear.cgColor
+        container.layer?.cornerRadius = Theme.Size.paletteRadius
+        container.layer?.cornerCurve = .continuous
+        container.layer?.masksToBounds = true
+        // Frames, not constraints: the glass view has an intrinsic size, and
+        // pinning it with constraints lets Auto Layout resize the window's
+        // content away from the frame the controller set.
+        for view in [Self.makeBackground(), host] {
+            view.frame = container.bounds
+            view.autoresizingMask = [.width, .height]
+            container.addSubview(view)
+        }
+        panel.contentView = container
         panel.delegate = self
         panel.onCancel = { [weak self] in self?.dismiss() }
+    }
+
+    /// Liquid Glass where the system has it, the popover material before.
+    private static func makeBackground() -> NSView {
+        if #available(macOS 26, *) {
+            let glass = NSGlassEffectView()
+            glass.cornerRadius = Theme.Size.paletteRadius
+            glass.tintColor = Theme.Color.paletteTint
+            return glass
+        }
+        let effect = NSVisualEffectView()
+        effect.material = .popover
+        effect.blendingMode = .behindWindow
+        effect.state = .active
+        effect.maskImage = roundedMask(radius: Theme.Size.paletteRadius)
+        return effect
+    }
+
+    /// A stretchable rounded rectangle, the supported way to shape a
+    /// behind-window material.
+    private static func roundedMask(radius: CGFloat) -> NSImage {
+        let side = radius * 2 + 1
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        image.resizingMode = .stretch
+        return image
     }
 
     var isShown: Bool { panel.isVisible }
@@ -80,6 +117,7 @@ final class SearchPaletteController: NSObject, NSWindowDelegate {
         let top = parent.frame.maxY - parent.frame.height * Theme.Size.paletteTopFraction
         let frame = NSRect(x: parent.frame.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
         panel.setFrame(frame, display: true)
+        panel.invalidateShadow()
     }
 
     func windowDidResignKey(_ notification: Notification) {
@@ -179,6 +217,7 @@ final class SearchPaletteModel: ObservableObject {
 struct SearchPaletteView: View {
     @ObservedObject var model: SearchPaletteModel
     @FocusState private var fieldFocused: Bool
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         VStack(spacing: 0) {
@@ -191,16 +230,21 @@ struct SearchPaletteView: View {
         .frame(width: Theme.Size.paletteWidth)
         // The panel takes its height from the content, never the other way around.
         .fixedSize(horizontal: false, vertical: true)
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Size.paletteRadius, style: .continuous)
+                .strokeBorder(Theme.Color.swiftUISeparator, lineWidth: 1 / displayScale)
+        )
+        .ignoresSafeArea()
         .onGeometryChange(for: CGSize.self) { $0.size } action: { model.onResize?($0) }
         .onAppear { fieldFocused = true }
         .onChange(of: model.rows) { fieldFocused = true }
     }
 
     private var field: some View {
-        HStack(spacing: Theme.Size.gap) {
+        HStack(spacing: Theme.Size.gap + Theme.Size.smallGap) {
             Image(systemName: Theme.Symbol.search)
-                .font(Theme.Font.swiftUIPaletteField)
-                .foregroundStyle(Theme.Color.swiftUISecondaryText)
+                .font(Theme.Font.swiftUIPaletteIcon)
+                .foregroundStyle(Theme.Color.swiftUIAccent)
             TextField("Search papers, or paste a DOI", text: $model.query)
                 .textFieldStyle(.plain)
                 .font(Theme.Font.swiftUIPaletteField)
@@ -210,9 +254,12 @@ struct SearchPaletteView: View {
                 .onKeyPress(.downArrow) { model.moveSelection(by: 1); return .handled }
                 .onKeyPress(.escape) { model.onDismiss?(); return .handled }
                 .accessibilityLabel("Search Library")
-            if !model.query.isEmpty {
+            if model.query.isEmpty {
+                KeyCap(text: "esc")
+            } else {
                 Button { model.query = "" } label: {
                     Image(systemName: Theme.Symbol.clear)
+                        .font(Theme.Font.swiftUIBody)
                         .foregroundStyle(Theme.Color.swiftUITertiaryText)
                 }
                 .buttonStyle(.plain)
@@ -227,12 +274,17 @@ struct SearchPaletteView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    Text(model.showsRecent ? "Recently Added" : "Papers")
-                        .font(Theme.Font.swiftUISectionLabel)
-                        .foregroundStyle(Theme.Color.swiftUITertiaryText)
-                        .textCase(.uppercase)
-                        .padding(.horizontal, Theme.Size.padding)
-                        .frame(height: Theme.Size.paletteSectionHeight, alignment: .bottomLeading)
+                    HStack {
+                        Text(model.showsRecent ? "Recently Added" : "Papers")
+                            .foregroundStyle(Theme.Color.swiftUIAccent)
+                            .textCase(.uppercase)
+                        Spacer()
+                        Text("↑↓ navigate   ↩ open")
+                            .foregroundStyle(Theme.Color.swiftUITertiaryText)
+                    }
+                    .font(Theme.Font.swiftUISectionLabel)
+                    .padding(.horizontal, Theme.Size.padding)
+                    .frame(height: Theme.Size.paletteSectionHeight, alignment: .bottom)
                     ForEach(Array(model.rows.enumerated()), id: \.offset) { index, row in
                         Button { model.activate(index) } label: {
                             PaletteRowLabel(row: row, selected: index == model.selection)
@@ -274,12 +326,11 @@ private struct PaletteRowLabel: View {
             }
             Spacer(minLength: 0)
             if selected {
-                Image(systemName: Theme.Symbol.returnKey)
-                    .font(Theme.Font.swiftUICaption)
-                    .foregroundStyle(secondary)
+                KeyCap(symbol: Theme.Symbol.returnKey)
             }
         }
-        .padding(.horizontal, Theme.Size.padding)
+        .padding(.leading, Theme.Size.paletteRowInset)
+        .padding(.trailing, Theme.Size.padding)
         .frame(height: Theme.Size.paletteRowHeight)
         .contentShape(Rectangle())
     }
@@ -288,28 +339,29 @@ private struct PaletteRowLabel: View {
         VStack(alignment: .leading, spacing: Theme.Size.smallGap / 2) {
             Text(item.title.isEmpty ? (item.doi ?? "Untitled") : item.title)
                 .font(Theme.Font.swiftUIPaletteTitle)
-                .foregroundStyle(primary)
+                .foregroundStyle(Theme.Color.swiftUIText)
                 .lineLimit(1)
             Text(metadata(item))
                 .font(Theme.Font.swiftUISecondary)
-                .foregroundStyle(secondary)
+                .foregroundStyle(Theme.Color.swiftUISecondaryText)
                 .lineLimit(1)
         }
     }
 
     private func action(symbol: String, title: String, detail: String, hint: String) -> some View {
-        HStack(spacing: Theme.Size.gap) {
+        HStack(spacing: Theme.Size.gap + Theme.Size.smallGap) {
             Image(systemName: symbol)
-                .font(Theme.Font.swiftUIBody)
-                .foregroundStyle(selected ? primary : Theme.Color.swiftUIAccent)
-                .frame(width: Theme.Size.iconSize)
+                .font(Theme.Font.swiftUICaption.weight(.bold))
+                .foregroundStyle(SwiftUI.Color(nsColor: Theme.Color.selectedText))
+                .frame(width: Theme.Size.paletteBadgeSize, height: Theme.Size.paletteBadgeSize)
+                .background(Circle().fill(Theme.Color.swiftUIAccent))
             (Text(title) + Text(detail).fontWeight(.semibold))
                 .font(Theme.Font.swiftUIBody)
-                .foregroundStyle(primary)
+                .foregroundStyle(Theme.Color.swiftUIText)
                 .lineLimit(1)
             Text(hint)
                 .font(Theme.Font.swiftUICaption)
-                .foregroundStyle(secondary)
+                .foregroundStyle(Theme.Color.swiftUISecondaryText)
         }
     }
 
@@ -319,17 +371,30 @@ private struct PaletteRowLabel: View {
             .filter { !$0.isEmpty }
             .joined(separator: " · ")
     }
+}
 
-    private var primary: SwiftUI.Color {
-        selected ? SwiftUI.Color(nsColor: Theme.Color.selectedText) : Theme.Color.swiftUIText
-    }
+/// A small key label, like the hints in Spotlight: "esc" or the return arrow.
+private struct KeyCap: View {
+    var text: String?
+    var symbol: String?
 
-    private var secondary: SwiftUI.Color {
-        selected ? SwiftUI.Color(nsColor: Theme.Color.selectedText).opacity(0.8) : Theme.Color.swiftUISecondaryText
+    var body: some View {
+        Group {
+            if let text { Text(text) } else if let symbol { Image(systemName: symbol) }
+        }
+        .font(Theme.Font.swiftUICaption.weight(.semibold))
+        .foregroundStyle(Theme.Color.swiftUIAccent)
+        .frame(minWidth: Theme.Size.paletteBadgeSize, minHeight: Theme.Size.paletteBadgeSize)
+        .padding(.horizontal, Theme.Size.smallGap)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Size.chipRadius, style: .continuous)
+                .fill(Theme.Color.swiftUIAccent.opacity(Theme.Opacity.tint))
+        )
     }
 }
 
-/// Accent fill for the selected (or hovered) row, darkened while pressed.
+/// The selected (or hovered) row: a soft accent tint with an accent bar on
+/// its leading edge, which deepens while pressed.
 private struct PaletteRowButtonStyle: ButtonStyle {
     let selected: Bool
 
@@ -337,9 +402,21 @@ private struct PaletteRowButtonStyle: ButtonStyle {
         configuration.label
             .background(
                 RoundedRectangle(cornerRadius: Theme.Size.chipRadius, style: .continuous)
-                    .fill(selected ? Theme.Color.swiftUIAccent : SwiftUI.Color.clear)
-                    .opacity(configuration.isPressed ? 0.8 : 1)
+                    .fill(Theme.Color.swiftUIAccent.opacity(fillOpacity(pressed: configuration.isPressed)))
                     .padding(.horizontal, Theme.Size.gap)
             )
+            .overlay(alignment: .leading) {
+                if selected {
+                    Capsule()
+                        .fill(Theme.Color.swiftUIAccent)
+                        .frame(width: Theme.Size.paletteSelectionBar, height: Theme.Size.paletteRowHeight - Theme.Size.padding)
+                        .padding(.leading, Theme.Size.gap + Theme.Size.smallGap)
+                }
+            }
+    }
+
+    private func fillOpacity(pressed: Bool) -> Double {
+        guard selected else { return 0 }
+        return pressed ? Theme.Opacity.pressedTint : Theme.Opacity.tint
     }
 }
