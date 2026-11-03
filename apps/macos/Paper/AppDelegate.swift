@@ -1,5 +1,6 @@
 import AppKit
 import PaperEngine
+import Sparkle
 import SwiftUI
 
 /// Owns the main menu, the welcome window, the settings window, and one
@@ -10,10 +11,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var welcomeWindow: NSWindow?
     private var settingsWindow: NSWindow?
     private var recentMenu: NSMenu!
+    /// Sparkle, which checks the appcast in `SUFeedURL` for new releases. Off
+    /// without a feed: under `swift run`, and in builds without an update key.
+    private var updater: SPUStandardUpdaterController?
 
     // MARK: Launch
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") != nil {
+            updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+        }
         NSApp.mainMenu = makeMainMenu()
         NSApp.activate(ignoringOtherApps: true)
 
@@ -204,6 +211,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About Paper", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        if let updater {
+            let checkItem = appMenu.addItem(withTitle: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "")
+            checkItem.target = updater
+        }
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Settings…", action: #selector(showSettings(_:)), keyEquivalent: ",")
         appMenu.addItem(.separator())

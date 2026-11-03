@@ -1,6 +1,6 @@
 import AppKit
 
-// Started with `swift run`, so there is no Info.plist; set up the app in code.
+// Set up the app in code, so it also runs under `swift run` without Info.plist.
 let delegate = AppDelegate()
 let app = NSApplication.shared
 app.delegate = delegate
