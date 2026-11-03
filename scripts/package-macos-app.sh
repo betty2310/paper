@@ -29,13 +29,21 @@ download_url="${DOWNLOAD_URL:-https://github.com/betty2310/paper/releases/downlo
 cd "$root"
 scripts/build-xcframework.sh release
 
-build=(swift build --package-path "$package" -c release --arch arm64 --arch x86_64)
-"${build[@]}"
-bin="$("${build[@]}" --show-bin-path)"
-
+# One build per architecture, joined with lipo. A single `--arch arm64 --arch
+# x86_64` build goes through xcbuild, which with Xcode 26 fails to link the
+# static PaperFFI.xcframework (library not found for -lpaper_ffi).
+# Copy each executable out: with Xcode 27 both builds share one output folder.
 rm -rf "$dist"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Frameworks"
-cp "$bin/Paper" "$app/Contents/MacOS/Paper"
+for arch in arm64 x86_64; do
+  build=(swift build --package-path "$package" -c release --triple "$arch-apple-macosx")
+  "${build[@]}"
+  bin="$("${build[@]}" --show-bin-path)"
+  cp "$bin/Paper" "$dist/Paper-$arch"
+done
+lipo -create "$dist"/Paper-{arm64,x86_64} -output "$app/Contents/MacOS/Paper"
+rm "$dist"/Paper-{arm64,x86_64}
+# Sparkle's framework is universal already; any build's copy will do.
 ditto "$bin/Sparkle.framework" "$app/Contents/Frameworks/Sparkle.framework"
 
 plist="$app/Contents/Info.plist"
