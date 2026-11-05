@@ -41,6 +41,10 @@ pub struct Settings {
     pub window: Option<WindowState>,
     pub sidebar_width: Option<f64>,
     pub detail_width: Option<f64>,
+    /// Whether the user hid the sidebar or the detail panel, so the window
+    /// opens the way it was left.
+    pub sidebar_collapsed: bool,
+    pub detail_collapsed: bool,
 }
 
 /// What is written to disk: the settings plus the recent library list, which
@@ -157,6 +161,7 @@ mod tests {
                 .update_settings(Settings {
                     contact_email: "me@example.org".into(),
                     sidebar_width: Some(240.0),
+                    detail_collapsed: true,
                     ..Settings::default()
                 })
                 .unwrap();
@@ -167,6 +172,8 @@ mod tests {
         let store = SettingsStore::open(&nested);
         assert_eq!(store.settings().contact_email, "me@example.org");
         assert_eq!(store.settings().sidebar_width, Some(240.0));
+        assert!(store.settings().detail_collapsed);
+        assert!(!store.settings().sidebar_collapsed);
         assert_eq!(
             store.recent_libraries(),
             vec!["a", "b"],

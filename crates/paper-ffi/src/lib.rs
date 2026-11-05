@@ -347,6 +347,8 @@ pub struct Settings {
     pub window: Option<WindowState>,
     pub sidebar_width: Option<f64>,
     pub detail_width: Option<f64>,
+    pub sidebar_collapsed: bool,
+    pub detail_collapsed: bool,
 }
 
 // ----- observer -----

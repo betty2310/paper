@@ -44,6 +44,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
 
+    /// Quitting closes no windows, so each one saves its layout here.
+    func applicationWillTerminate(_ notification: Notification) {
+        libraryWindows.forEach { $0.saveLayout() }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }

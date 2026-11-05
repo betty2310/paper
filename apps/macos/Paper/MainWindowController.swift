@@ -185,6 +185,29 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         // the inspector's width excludes the divider's thickness.
         splitView.setPosition(splitView.bounds.width - (settings.detailWidth ?? Theme.Size.inspectorWidth) - splitView.dividerThickness, ofDividerAt: 1)
         splitView.setPosition(settings.sidebarWidth ?? Theme.Size.sidebarWidth, ofDividerAt: 0)
+        // Hidden panels stay hidden, after their widths are in place so
+        // showing them again brings back the width the user chose.
+        splitViewController.splitViewItems[0].isCollapsed = settings.sidebarCollapsed
+        inspectorItem.isCollapsed = settings.detailCollapsed
+        // However a panel is hidden or shown (the toolbar buttons, the menu,
+        // or dragging its divider shut), the choice is written at once.
+        panelObservers = [splitViewController.splitViewItems[0], inspectorItem].map { item in
+            item.observe(\.isCollapsed) { [weak self] _, _ in
+                DispatchQueue.main.async { self?.savePanelsShown() }
+            }
+        }
+    }
+
+    private var panelObservers: [NSKeyValueObservation] = []
+
+    /// Only the hidden flags: mid animation a panel's width is not the one
+    /// the user chose. Widths are written with the rest in `saveLayout`.
+    private func savePanelsShown() {
+        var settings = store.settings
+        settings.sidebarCollapsed = splitViewController.splitViewItems[0].isCollapsed
+        settings.detailCollapsed = inspectorItem.isCollapsed
+        guard settings != store.settings else { return }
+        store.updateSettings(settings)
     }
 
     private func updateTitle(scope: Scope, count: Int) {
@@ -633,15 +656,27 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         return false
     }
 
-    func windowWillClose(_ notification: Notification) {
-        readers.forEach { $0.close() }
+    /// Remembers the window's frame, the panel widths, and which panels are
+    /// hidden, so the next launch opens the same way. Called when the window
+    /// closes and when the app quits, which closes no windows.
+    func saveLayout() {
+        guard hasShown else { return }
         var settings = store.settings
-        settings.sidebarWidth = splitViewController.splitViewItems[0].isCollapsed ? settings.sidebarWidth : sidebarContent.view.frame.width
+        let sidebarItem = splitViewController.splitViewItems[0]
+        settings.sidebarWidth = sidebarItem.isCollapsed ? settings.sidebarWidth : sidebarContent.view.frame.width
         settings.detailWidth = inspectorItem.isCollapsed ? settings.detailWidth : inspector.view.frame.width
+        settings.sidebarCollapsed = sidebarItem.isCollapsed
+        settings.detailCollapsed = inspectorItem.isCollapsed
         if let frame = window?.frame {
             settings.window = WindowState(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height)
         }
+        guard settings != store.settings else { return }
         store.updateSettings(settings)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        readers.forEach { $0.close() }
+        saveLayout()
         store.close()
         (NSApp.delegate as? AppDelegate)?.windowClosed(self)
     }

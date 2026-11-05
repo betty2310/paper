@@ -2799,16 +2799,20 @@ public struct Settings: Equatable, Hashable {
     public var window: WindowState?
     public var sidebarWidth: Double?
     public var detailWidth: Double?
+    public var sidebarCollapsed: Bool
+    public var detailCollapsed: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(contactEmail: String, openalexApiKey: String, anthropicApiKey: String, window: WindowState?, sidebarWidth: Double?, detailWidth: Double?) {
+    public init(contactEmail: String, openalexApiKey: String, anthropicApiKey: String, window: WindowState?, sidebarWidth: Double?, detailWidth: Double?, sidebarCollapsed: Bool, detailCollapsed: Bool) {
         self.contactEmail = contactEmail
         self.openalexApiKey = openalexApiKey
         self.anthropicApiKey = anthropicApiKey
         self.window = window
         self.sidebarWidth = sidebarWidth
         self.detailWidth = detailWidth
+        self.sidebarCollapsed = sidebarCollapsed
+        self.detailCollapsed = detailCollapsed
     }
 
     
@@ -2832,7 +2836,9 @@ public struct FfiConverterTypeSettings: FfiConverterRustBuffer {
                 anthropicApiKey: FfiConverterString.read(from: &buf), 
                 window: FfiConverterOptionTypeWindowState.read(from: &buf), 
                 sidebarWidth: FfiConverterOptionDouble.read(from: &buf), 
-                detailWidth: FfiConverterOptionDouble.read(from: &buf)
+                detailWidth: FfiConverterOptionDouble.read(from: &buf), 
+                sidebarCollapsed: FfiConverterBool.read(from: &buf), 
+                detailCollapsed: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -2843,6 +2849,8 @@ public struct FfiConverterTypeSettings: FfiConverterRustBuffer {
         FfiConverterOptionTypeWindowState.write(value.window, into: &buf)
         FfiConverterOptionDouble.write(value.sidebarWidth, into: &buf)
         FfiConverterOptionDouble.write(value.detailWidth, into: &buf)
+        FfiConverterBool.write(value.sidebarCollapsed, into: &buf)
+        FfiConverterBool.write(value.detailCollapsed, into: &buf)
     }
 }
 
