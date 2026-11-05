@@ -9,11 +9,15 @@ use crate::http::{HttpClient, Response};
 /// One recorded request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request {
+    pub method: &'static str,
     pub url: String,
     pub headers: BTreeMap<String, String>,
+    /// The body of a POST; empty for a GET.
+    pub body: Vec<u8>,
 }
 
-/// Answers GETs from a table of URL to response. Unknown URLs answer 404.
+/// Answers requests from a table of URL to response, whatever the method.
+/// Unknown URLs answer 404.
 #[derive(Default)]
 pub struct FakeHttp {
     /// The answers for a URL in order; the last one repeats.
@@ -106,21 +110,16 @@ pub fn json_response(status: u16, body: Vec<u8>, retry_after: Option<u64>) -> Re
     }
 }
 
-impl HttpClient for FakeHttp {
-    fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Response, FetchError> {
-        self.requests.lock().unwrap().push(Request {
-            url: url.to_string(),
-            headers: headers
-                .iter()
-                .map(|(name, value)| (name.to_string(), value.to_string()))
-                .collect(),
-        });
+impl FakeHttp {
+    fn answer(&self, request: Request) -> Result<Response, FetchError> {
+        let url = request.url.clone();
+        self.requests.lock().unwrap().push(request);
         self.pass_gate();
         if let Some(message) = self.failure.lock().unwrap().clone() {
             return Err(FetchError::Network { message });
         }
         let mut routes = self.routes.lock().unwrap();
-        let response = match routes.get_mut(url) {
+        let response = match routes.get_mut(&url) {
             Some(responses) if responses.len() > 1 => responses.pop_front(),
             Some(responses) => responses.front().cloned(),
             None => None,
@@ -131,5 +130,37 @@ impl HttpClient for FakeHttp {
             content_type: None,
             retry_after: None,
         }))
+    }
+}
+
+fn header_map(headers: &[(&str, &str)]) -> BTreeMap<String, String> {
+    headers
+        .iter()
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect()
+}
+
+impl HttpClient for FakeHttp {
+    fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Response, FetchError> {
+        self.answer(Request {
+            method: "GET",
+            url: url.to_string(),
+            headers: header_map(headers),
+            body: Vec::new(),
+        })
+    }
+
+    fn post(
+        &self,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> Result<Response, FetchError> {
+        self.answer(Request {
+            method: "POST",
+            url: url.to_string(),
+            headers: header_map(headers),
+            body: body.to_vec(),
+        })
     }
 }

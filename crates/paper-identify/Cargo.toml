@@ -1,0 +1,12 @@
+[package]
+name = "paper-identify"
+description = "Finds which paper a PDF is: reads its first pages, ranks the DOI and arXiv candidates, guesses the title, and renders page 1. No network."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+paper-ids.workspace = true
+pdf_oxide.workspace = true
+regex.workspace = true
+tracing.workspace = true

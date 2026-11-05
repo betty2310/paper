@@ -103,10 +103,30 @@ impl Resolver {
         headers: &[(&str, &str)],
         progress: &mut dyn FnMut(u64, Option<u64>),
     ) -> Result<Response, FetchError> {
+        self.retrying(url, &mut || self.client.download(url, headers, progress))
+    }
+
+    /// A rate limited POST, retried like `get`.
+    pub(crate) fn post(
+        &self,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> Result<Response, FetchError> {
+        self.retrying(url, &mut || self.client.post(url, headers, body))
+    }
+
+    /// Sends a request through the rate limiter and sends it again on 429
+    /// and 5xx, honoring `Retry-After`.
+    fn retrying(
+        &self,
+        url: &str,
+        send: &mut dyn FnMut() -> Result<Response, FetchError>,
+    ) -> Result<Response, FetchError> {
         let mut attempt = 1;
         loop {
             self.limiter.wait_for(url);
-            let response = self.client.download(url, headers, progress)?;
+            let response = send()?;
             let should_retry = response.status == 429 || response.status >= 500;
             if !should_retry || attempt >= ATTEMPTS {
                 return Ok(response);

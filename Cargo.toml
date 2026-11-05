@@ -4,6 +4,7 @@ members = [
     "crates/paper-ids",
     "crates/paper-core",
     "crates/paper-fetch",
+    "crates/paper-identify",
     "crates/paper-engine",
     "crates/paper-ffi",
     "tools/uniffi-bindgen",
@@ -19,6 +20,7 @@ repository = "https://github.com/betty2310/paper"
 paper-ids = { path = "crates/paper-ids" }
 paper-core = { path = "crates/paper-core" }
 paper-fetch = { path = "crates/paper-fetch" }
+paper-identify = { path = "crates/paper-identify" }
 paper-engine = { path = "crates/paper-engine" }
 uniffi = "0.32"
 thiserror = "2"
@@ -34,6 +36,10 @@ ureq = { version = "3", default-features = false, features = ["rustls", "platfor
 tempfile = "3"
 sha2 = "0.10"
 pollster = "0.4"
+regex = "1"
+base64 = "0.22"
+# Pure Rust. `rendering` draws page 1 for the model fallback.
+pdf_oxide = { version = "0.3.78", default-features = false, features = ["rendering"] }
 
 [profile.release]
 lto = "thin"

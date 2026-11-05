@@ -672,6 +672,8 @@ public protocol EngineProtocol: AnyObject, Sendable {
     
     func findPdf(itemId: String) async throws  -> AttachmentRow
     
+    func importPdf(path: String) async throws  -> ImportedPdf
+    
     func itemDetail(id: String) throws  -> ItemDetail
     
     func libraryPath()  -> String
@@ -901,6 +903,22 @@ open func findPdf(itemId: String)async throws  -> AttachmentRow  {
             completeFunc: ffi_paper_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_paper_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeAttachmentRow_lift,
+            errorHandler: FfiConverterTypePaperError_lift
+        )
+}
+    
+open func importPdf(path: String)async throws  -> ImportedPdf  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_paper_ffi_fn_method_engine_import_pdf(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(path)
+                )
+            },
+            pollFunc: ffi_paper_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_paper_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_paper_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeImportedPdf_lift,
             errorHandler: FfiConverterTypePaperError_lift
         )
 }
@@ -1810,6 +1828,60 @@ public func FfiConverterTypeCreator_lower(_ value: Creator) -> RustBuffer {
 }
 
 
+public struct ImportedPdf: Equatable, Hashable {
+    public var item: ItemRow
+    public var identification: Identification
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(item: ItemRow, identification: Identification) {
+        self.item = item
+        self.identification = identification
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ImportedPdf: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeImportedPdf: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ImportedPdf {
+        return
+            try ImportedPdf(
+                item: FfiConverterTypeItemRow.read(from: &buf), 
+                identification: FfiConverterTypeIdentification.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ImportedPdf, into buf: inout [UInt8]) {
+        FfiConverterTypeItemRow.write(value.item, into: &buf)
+        FfiConverterTypeIdentification.write(value.identification, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeImportedPdf_lift(_ buf: RustBuffer) throws -> ImportedPdf {
+    return try FfiConverterTypeImportedPdf.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeImportedPdf_lower(_ value: ImportedPdf) -> RustBuffer {
+    return FfiConverterTypeImportedPdf.lower(value)
+}
+
+
 public struct ItemDetail: Equatable, Hashable {
     public var id: String
     public var fields: ItemFields
@@ -2267,15 +2339,17 @@ public func FfiConverterTypeMetadataPatch_lower(_ value: MetadataPatch) -> RustB
 public struct Settings: Equatable, Hashable {
     public var contactEmail: String
     public var openalexApiKey: String
+    public var anthropicApiKey: String
     public var window: WindowState?
     public var sidebarWidth: Double?
     public var detailWidth: Double?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(contactEmail: String, openalexApiKey: String, window: WindowState?, sidebarWidth: Double?, detailWidth: Double?) {
+    public init(contactEmail: String, openalexApiKey: String, anthropicApiKey: String, window: WindowState?, sidebarWidth: Double?, detailWidth: Double?) {
         self.contactEmail = contactEmail
         self.openalexApiKey = openalexApiKey
+        self.anthropicApiKey = anthropicApiKey
         self.window = window
         self.sidebarWidth = sidebarWidth
         self.detailWidth = detailWidth
@@ -2299,6 +2373,7 @@ public struct FfiConverterTypeSettings: FfiConverterRustBuffer {
             try Settings(
                 contactEmail: FfiConverterString.read(from: &buf), 
                 openalexApiKey: FfiConverterString.read(from: &buf), 
+                anthropicApiKey: FfiConverterString.read(from: &buf), 
                 window: FfiConverterOptionTypeWindowState.read(from: &buf), 
                 sidebarWidth: FfiConverterOptionDouble.read(from: &buf), 
                 detailWidth: FfiConverterOptionDouble.read(from: &buf)
@@ -2308,6 +2383,7 @@ public struct FfiConverterTypeSettings: FfiConverterRustBuffer {
     public static func write(_ value: Settings, into buf: inout [UInt8]) {
         FfiConverterString.write(value.contactEmail, into: &buf)
         FfiConverterString.write(value.openalexApiKey, into: &buf)
+        FfiConverterString.write(value.anthropicApiKey, into: &buf)
         FfiConverterOptionTypeWindowState.write(value.window, into: &buf)
         FfiConverterOptionDouble.write(value.sidebarWidth, into: &buf)
         FfiConverterOptionDouble.write(value.detailWidth, into: &buf)
@@ -2516,6 +2592,96 @@ public func FfiConverterTypeCreatorRole_lift(_ buf: RustBuffer) throws -> Creato
 #endif
 public func FfiConverterTypeCreatorRole_lower(_ value: CreatorRole) -> RustBuffer {
     return FfiConverterTypeCreatorRole.lower(value)
+}
+
+
+
+
+public enum Identification: Equatable, Hashable {
+    
+    case fileText
+    case titleSearch
+    case model
+    case notFound
+    case failed(message: String
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension Identification: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeIdentification: FfiConverterRustBuffer {
+    typealias SwiftType = Identification
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Identification {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .fileText
+        
+        case 2: return .titleSearch
+        
+        case 3: return .model
+        
+        case 4: return .notFound
+        
+        case 5: return .failed(message: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: Identification, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .fileText:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .titleSearch:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .model:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .notFound:
+            writeInt(&buf, Int32(4))
+        
+        
+        case let .failed(message):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(message, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeIdentification_lift(_ buf: RustBuffer) throws -> Identification {
+    return try FfiConverterTypeIdentification.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeIdentification_lower(_ value: Identification) -> RustBuffer {
+    return FfiConverterTypeIdentification.lower(value)
 }
 
 
@@ -3702,6 +3868,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_find_pdf() != 62843) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paper_ffi_checksum_method_engine_import_pdf() != 12258) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_item_detail() != 55787) {

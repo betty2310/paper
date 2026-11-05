@@ -8,10 +8,14 @@
 //!
 //! `Resolver::find_pdf` looks for an open access PDF in arXiv, OpenAlex,
 //! Unpaywall, and Europe PMC, and downloads the first real PDF it finds.
+//!
+//! `Resolver::search_title` and `Resolver::read_first_page` are the network
+//! steps of identifying a PDF that does not print its DOI.
 
 mod crossref;
 mod csl;
 mod http;
+mod identify;
 mod pdf;
 mod rate_limit;
 mod resolver;
@@ -20,8 +24,17 @@ pub mod testing;
 mod text;
 
 pub use http::{Contact, HttpClient, Response, USER_AGENT_PRODUCT, UreqClient};
+pub use identify::{
+    CROSSREF_SEARCH, MESSAGES_URL, MODEL, MODEL_SOURCE, PageReading, TitleMatch, TitleSearch,
+};
 pub use pdf::{FoundPdf, PdfQuery, PdfSearch, is_pdf};
 pub use resolver::{Lookup, Resolver};
+
+/// The Crossref search URL `Resolver::search_title` asks, for scripting
+/// answers in tests.
+pub fn title_search_url(query: &str, email: Option<&str>) -> String {
+    crossref::search_url(query, email)
+}
 
 /// Errors from the lookup pipeline. The engine maps them onto `PaperError`.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

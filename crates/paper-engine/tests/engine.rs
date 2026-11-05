@@ -6,8 +6,8 @@ use std::thread::{self, ThreadId};
 use std::time::{Duration, Instant};
 
 use paper_engine::{
-    Engine, EngineObserver, EngineOptions, ItemKind, ItemQuery, LookupStatus, MetadataPatch,
-    PaperError, PdfStatus, PdfStep, Scope,
+    Engine, EngineObserver, EngineOptions, Identification, ItemKind, ItemQuery, LookupStatus,
+    MetadataPatch, PaperError, PdfStatus, PdfStep, Scope,
 };
 use paper_fetch::testing::FakeHttp;
 use pollster::block_on;
@@ -961,4 +961,261 @@ fn attached_files_are_copied_and_reading_positions_are_kept() {
     assert_eq!(h.engine.list_items(&unread).unwrap().len(), 0);
     let file = h.engine.attachment_file(&attached.id).unwrap();
     assert_eq!((file.last_page, file.last_zoom), (Some(3), Some(1.5)));
+}
+
+// ----- import_pdf -----
+
+const CROSSREF_TEN_RULES: &str = "https://api.crossref.org/works/10.1371/journal.pcbi.1005619";
+
+/// Writes a one page PDF from Markdown, the way a paper's first page looks to
+/// the text extractor: the `#` heading is the largest text.
+fn write_pdf(dir: &std::path::Path, name: &str, markdown: &str) -> std::path::PathBuf {
+    let mut pdf = pdf_oxide::api::PdfBuilder::new()
+        .from_markdown(markdown)
+        .unwrap();
+    let path = dir.join(name);
+    std::fs::write(&path, pdf.to_bytes().unwrap()).unwrap();
+    path
+}
+
+fn deep_learning_page(with_doi: bool) -> String {
+    format!(
+        "# Deep learning\n\nYann LeCun, Yoshua Bengio, Geoffrey Hinton\n\n\
+         Deep learning allows computational models that are composed of multiple \
+         processing layers to learn representations of data.\n\n{}\
+         ## References\n\n1. Hinton, G. A fast learning algorithm. doi:10.1162/neco.2006.18.7.1527\n",
+        if with_doi {
+            "Nature 521, 436-444 (2015). https://doi.org/10.1038/nature14539\n\n"
+        } else {
+            ""
+        }
+    )
+}
+
+fn model_answer(doi: &str, title: &str) -> Vec<u8> {
+    let answer = serde_json::json!({
+        "doi": doi, "arxiv_id": null, "title": title, "first_author_family_name": "LeCun"
+    });
+    serde_json::json!({"content": [{"type": "text", "text": answer.to_string()}]})
+        .to_string()
+        .into_bytes()
+}
+
+#[test]
+fn a_pdf_that_prints_its_doi_is_filed_under_that_paper() {
+    let h = harness();
+    let path = write_pdf(h._dir.path(), "lecun2015.pdf", &deep_learning_page(true));
+    let original = std::fs::read(&path).unwrap();
+
+    let imported = block_on(h.engine.import_pdf(path.to_str().unwrap())).unwrap();
+
+    assert_eq!(imported.identification, Identification::FileText);
+    let row = &imported.item;
+    assert_eq!(row.title, "Deep learning");
+    assert_eq!(row.doi.as_deref(), Some("10.1038/nature14539"));
+    assert_eq!(row.lookup_status, LookupStatus::Done);
+    assert!(row.has_pdf);
+    let detail = h.engine.item_detail(&row.id).unwrap();
+    assert_eq!(detail.attachments.len(), 1);
+    let file = h.engine.attachment_file(&detail.attachments[0].id).unwrap();
+    assert!(file.path.ends_with("/Deep learning.pdf"), "{}", file.path);
+    assert_eq!(std::fs::read(&file.path).unwrap(), original);
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        original,
+        "the dropped file is untouched"
+    );
+
+    assert!(
+        h.http.requests().iter().all(|r| r.method == "GET"),
+        "no model without a key"
+    );
+    assert!(
+        !h.http.requests().iter().any(|r| r.url.contains("neco")),
+        "cited DOIs after the references heading are never looked up"
+    );
+    let events = h.events.take();
+    assert_eq!(
+        events.first(),
+        Some(&Event::Items(vec![row.id.clone()])),
+        "the row shows at once"
+    );
+    assert!(events.contains(&Event::Lookup(row.id.clone(), LookupStatus::Pending)));
+    assert_eq!(
+        &events[events.len() - 2..],
+        &[
+            Event::Lookup(row.id.clone(), LookupStatus::Done),
+            Event::Items(vec![row.id.clone()])
+        ]
+    );
+}
+
+#[test]
+fn a_pdf_without_a_doi_is_found_by_its_title() {
+    let h = harness();
+    let title = "Ten simple rules for structuring papers";
+    h.http.route(
+        &paper_fetch::title_search_url(title, None),
+        200,
+        serde_json::json!({"message": {"items": [
+            {"DOI": "10.1371/journal.pcbi.1005619.s001", "title": [title], "type": "component"},
+            {"DOI": "10.1371/JOURNAL.PCBI.1005619", "title": [title], "type": "journal-article"},
+        ]}})
+        .to_string()
+        .into_bytes(),
+    );
+    h.http
+        .route(CROSSREF_TEN_RULES, 200, fixture("crossref_plos_pcbi.json"));
+    let path = write_pdf(
+        h._dir.path(),
+        "mensh.pdf",
+        &format!(
+            "# {title}\n\nBrett Mensh, Konrad Kording\n\nGood scientific writing is essential.\n"
+        ),
+    );
+
+    let imported = block_on(h.engine.import_pdf(path.to_str().unwrap())).unwrap();
+
+    assert_eq!(imported.identification, Identification::TitleSearch);
+    assert_eq!(
+        imported.item.doi.as_deref(),
+        Some("10.1371/journal.pcbi.1005619")
+    );
+    assert_eq!(imported.item.title, title);
+}
+
+#[test]
+fn the_model_reads_page_one_only_with_a_key_and_only_when_the_file_does_not_say() {
+    let h = harness();
+    let path = write_pdf(h._dir.path(), "lecun2015.pdf", &deep_learning_page(false));
+    h.http.route(
+        paper_fetch::MESSAGES_URL,
+        200,
+        model_answer("https://doi.org/10.1038/nature14539", "Deep learning"),
+    );
+
+    // Without a key nothing leaves the machine but Crossref requests, and the
+    // file is kept under its own name for the user to identify.
+    let unknown = block_on(h.engine.import_pdf(path.to_str().unwrap())).unwrap();
+    assert_eq!(unknown.identification, Identification::NotFound);
+    assert_eq!(unknown.item.title, "lecun2015");
+    assert_eq!(unknown.item.lookup_status, LookupStatus::Failed);
+    assert!(unknown.item.has_pdf);
+    assert!(h.http.requests().iter().all(|r| r.method == "GET"));
+
+    let mut settings = h.engine.settings();
+    settings.anthropic_api_key = " sk-test ".into();
+    h.engine.update_settings(settings).unwrap();
+    let found = block_on(h.engine.import_pdf(path.to_str().unwrap())).unwrap();
+    assert_eq!(found.identification, Identification::Model);
+    assert_eq!(found.item.doi.as_deref(), Some("10.1038/nature14539"));
+    assert_eq!(found.item.title, "Deep learning");
+
+    let posts: Vec<_> = h
+        .http
+        .requests()
+        .into_iter()
+        .filter(|r| r.method == "POST")
+        .collect();
+    assert_eq!(posts.len(), 1);
+    assert_eq!(posts[0].headers["x-api-key"], "sk-test");
+    let sent: serde_json::Value = serde_json::from_slice(&posts[0].body).unwrap();
+    let image = sent["messages"][0]["content"][0]["source"]["data"]
+        .as_str()
+        .unwrap();
+    assert!(image.starts_with("iVBORw0KGgo"), "page 1 goes as a PNG");
+
+    // A DOI the model misreads is not trusted: its registered title differs.
+    h.http.route(
+        paper_fetch::MESSAGES_URL,
+        200,
+        model_answer("10.1371/journal.pcbi.1005619", "Deep learning"),
+    );
+    h.http
+        .route(CROSSREF_TEN_RULES, 200, fixture("crossref_plos_pcbi.json"));
+    let other = write_pdf(h._dir.path(), "copy.pdf", &deep_learning_page(false));
+    let misread = block_on(h.engine.import_pdf(other.to_str().unwrap())).unwrap();
+    assert_eq!(misread.identification, Identification::NotFound);
+    assert_eq!(misread.item.doi, None);
+}
+
+#[test]
+fn a_rejected_key_is_reported_and_the_pdf_is_kept() {
+    let h = harness();
+    let mut settings = h.engine.settings();
+    settings.anthropic_api_key = "sk-wrong".into();
+    h.engine.update_settings(settings).unwrap();
+    h.http.route(
+        paper_fetch::MESSAGES_URL,
+        401,
+        b"{\"type\":\"error\"}".to_vec(),
+    );
+    let path = write_pdf(h._dir.path(), "lecun2015.pdf", &deep_learning_page(false));
+
+    let imported = block_on(h.engine.import_pdf(path.to_str().unwrap())).unwrap();
+
+    assert_eq!(
+        imported.identification,
+        Identification::Failed {
+            message: "Anthropic did not accept the API key.".into()
+        }
+    );
+    assert!(imported.item.has_pdf);
+}
+
+#[test]
+fn importing_a_paper_already_in_the_library_gives_that_item_the_pdf() {
+    let h = harness();
+    let existing = block_on(h.engine.add_by_identifier("10.1038/nature14539")).unwrap();
+    assert!(!existing.has_pdf);
+    let path = write_pdf(h._dir.path(), "lecun2015.pdf", &deep_learning_page(true));
+
+    let result = block_on(h.engine.import_pdf(path.to_str().unwrap()));
+
+    assert_eq!(
+        result.unwrap_err(),
+        PaperError::Duplicate {
+            doi: "10.1038/nature14539".into(),
+            item_id: existing.id.clone()
+        }
+    );
+    let rows = h.engine.list_items(&ItemQuery::default()).unwrap();
+    assert_eq!(rows.len(), 1, "the new row is gone");
+    assert!(rows[0].has_pdf);
+
+    // A second copy changes nothing: the item keeps its first PDF.
+    let again = block_on(h.engine.import_pdf(path.to_str().unwrap()));
+    assert!(matches!(again, Err(PaperError::Duplicate { .. })));
+    assert_eq!(
+        h.engine
+            .item_detail(&existing.id)
+            .unwrap()
+            .attachments
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn offline_imports_keep_the_file_and_non_pdfs_add_nothing() {
+    let h = harness();
+    h.http.fail_with("no route to host");
+    let path = write_pdf(h._dir.path(), "lecun2015.pdf", &deep_learning_page(true));
+    let imported = block_on(h.engine.import_pdf(path.to_str().unwrap())).unwrap();
+    assert_eq!(
+        imported.identification,
+        Identification::Failed {
+            message: "no route to host".into()
+        }
+    );
+    assert_eq!(imported.item.title, "lecun2015");
+    assert!(imported.item.has_pdf);
+
+    let html = h._dir.path().join("paper.pdf");
+    std::fs::write(&html, "<html>Access denied</html>").unwrap();
+    assert!(matches!(
+        block_on(h.engine.import_pdf(html.to_str().unwrap())),
+        Err(PaperError::NotPdf { .. })
+    ));
+    assert_eq!(h.engine.list_items(&ItemQuery::default()).unwrap().len(), 1);
 }

@@ -15,6 +15,7 @@ paper/
 │   ├── paper-core/            domain types, SQLite storage, library service, settings
 │   ├── paper-ids/             DOI and arXiv parsing and normalization
 │   ├── paper-fetch/           Crossref, OpenAlex, Unpaywall, arXiv, PMC clients and the lookup pipeline
+│   ├── paper-identify/        reads the first pages of a PDF (pdf_oxide) and ranks its DOI and arXiv candidates
 │   ├── paper-cite/            BibTeX and CSL output (hayagriva, biblatex)
 │   ├── paper-engine/          the public API: Engine, commands, view models, observer, threads
 │   ├── paper-ffi/             UniFFI exports of paper-engine, builds the static library
@@ -31,7 +32,7 @@ paper/
 └── .github/workflows/
 ```
 
-Dependency direction is strictly `paper-ffi` → `paper-engine` → (`paper-core`, `paper-ids`, `paper-fetch`, `paper-cite`), and `paper-core` depends on nothing else in the workspace. `paper-fetch` returns plain data types defined in `paper-core`. `paper-pdf` is behind a `pdfium` cargo feature of `paper-engine` that the macOS build leaves off. The Swift app depends only on the `PaperEngine` package and never opens the database, calls the network, or reads API responses itself.
+Dependency direction is strictly `paper-ffi` → `paper-engine` → (`paper-core`, `paper-ids`, `paper-fetch`, `paper-identify`, `paper-cite`), and `paper-core` depends on nothing else in the workspace. `paper-identify` depends only on `paper-ids` and the pure Rust `pdf_oxide`, never touches the network, and runs the same on every platform; it is how the engine reads a PDF it is given, separate from the app's reader. `paper-fetch` returns plain data types defined in `paper-core`. `paper-pdf` is behind a `pdfium` cargo feature of `paper-engine` that the macOS build leaves off. The Swift app depends only on the `PaperEngine` package and never opens the database, calls the network, or reads API responses itself.
 
 ```diagram
 ┌──────────────────────────────────────────────────────────────┐
@@ -60,16 +61,26 @@ Dependency direction is strictly `paper-ffi` → `paper-engine` → (`paper-core
 | Group | Methods | Notes |
 |---|---|---|
 | Library | `open_library(path)`, `create_library(path)`, `recent_libraries()`, `close()` | `Engine` is created by `open_library`. |
-| Items | `list_items(ItemQuery) -> Vec<ItemRow>`, `item_detail(id) -> ItemDetail`, `add_by_identifier(text)`, `retry_lookup(id)`, `import_pdf(path)`, `update_metadata(id, MetadataPatch)`, `delete_items(ids)`, `undo_delete()` | `ItemQuery` is text, scope, sort column, and direction; the text runs through FTS5. `scope` is a collection, a tag, or one of the smart lists. `add_by_identifier` inserts a `Pending` placeholder row at once, then fills it in from the lookup; a failed lookup leaves the row `Failed` for `retry_lookup`. |
+| Items | `list_items(ItemQuery) -> Vec<ItemRow>`, `item_detail(id) -> ItemDetail`, `add_by_identifier(text)`, `retry_lookup(id)`, `import_pdf(path)`, `update_metadata(id, MetadataPatch)`, `delete_items(ids)`, `undo_delete()` | `ItemQuery` is text, scope, sort column, and direction; the text runs through FTS5. `scope` is a collection, a tag, or one of the smart lists. `add_by_identifier` inserts a `Pending` placeholder row at once, then fills it in from the lookup; a failed lookup leaves the row `Failed` for `retry_lookup`. `import_pdf` does the same for a PDF file and returns `ImportedPdf` with how the paper was identified (see below); a file nothing identifies stays as an item with its PDF and a `Failed` row, and a paper already in the library gets the PDF and returns `Duplicate`. |
 | Collections and tags | `collection_tree() -> Vec<CollectionNode>`, `create_collection`, `rename_collection`, `move_collection`, `add_to_collection`, `tags()`, `set_tags(id, names)` | |
 | Attachments | `attachment_file(id) -> AttachmentFile` (absolute path, last page, last zoom), `set_reading_position(id, page, zoom)`, `attach_file(item_id, path)`, `find_pdf(item_id)` | A finished `add_by_identifier` starts `find_pdf` on its own, and the app follows it through `pdf_progress` and `pdf_step`. `find_pdf` returns the PDF the item already has without touching the network, fails with `PdfNotFound` when no source offers one, and allows one search per item at a time. Zoom 0 means fit width. |
 | Annotations | `annotations(attachment_id) -> Vec<Annotation>`, `create_annotation(New)`, `update_annotation(id, Patch)`, `delete_annotation(id)`, `import_embedded(attachment_id, Vec<New>)` | Geometry is in PDF user space, see below. |
 | Notes | `note(item_id)`, `save_note(item_id, markdown)` | Autosave calls `save_note` with a debounce in the app. |
 | Citations | `bibtex(ids) -> String`, `citation(ids, style) -> String`, `export_bib(ids, path)` | |
-| Settings | `settings()`, `update_settings(Patch)` | Contact email, OpenAlex key, window state, panel sizes. |
+| Settings | `settings()`, `update_settings(Patch)` | Contact email, OpenAlex key, Anthropic key, window state, panel sizes. |
 | Events | `set_observer(Arc<dyn EngineObserver>)` with `items_changed(ids)`, `collections_changed()`, `tags_changed()`, `lookup_progress(item_id, LookupStatus)`, `pdf_progress(item_id, PdfStatus)`, `pdf_step(item_id, PdfStep)` (the source being asked, or bytes downloaded of the total, at most every 50 ms) | A foreign trait the app implements. An event caused by a synchronous call arrives on the caller's thread before that call returns; everything a lookup does after it leaves for the network (database writes and events) runs on an engine thread, so the app hops to the main thread asynchronously, never with a blocking dispatch. Errors are not events: every `async fn` returns its own `PaperError`, and lookup errors carry the id of the row they left behind. |
 
 Rules for the API. Reads that the UI needs on every keystroke or scroll, such as `list_items`, are synchronous and return in a few milliseconds from the database. Anything that touches the network or takes more than a few milliseconds is an `async fn` that completes a UniFFI future on the engine's thread pool. Records are plain data (`ItemRow`, `ItemDetail`, `CollectionNode`, `Annotation`, `AttachmentFile`), enums are closed sets (`ItemKind`, `AnnotationKind`, `LookupStatus`, `SortColumn`), errors are one `PaperError` enum with a variant per subsystem, and no method returns a handle that the caller must keep alive except `Engine` itself. The app subscribes once with `set_observer`, so nothing in the engine ever calls back into the UI toolkit.
+
+## Identifying a PDF
+
+`import_pdf` reads the first three pages with `paper-identify` and tries three steps, stopping at the first answer that Crossref confirms. The measurements behind the order are in `docs/research/pdf-identification.md`.
+
+1. File text. DOIs and arXiv IDs from the Info dictionary, the XMP packet, `doi.org` links, and the text of the pages, ranked by where they appear and cut off at a references heading. The best four are looked up, and one counts when its registered title is on page 1. `Identification::FileText`.
+2. Title search. The first run of lines in the largest font on page 1, searched with Crossref's bibliographic query. A result counts when its title matches (supplementary files and peer reviews that share the title are skipped). `Identification::TitleSearch`; the app may ask the user to check these, because titles collide.
+3. Model. Only when the user has set an Anthropic API key: page 1 is rendered to a PNG of at most 1568 px and sent to `claude-haiku-5-5`, which returns the printed DOI, arXiv ID, title, and first author as JSON. A DOI it reads counts when its registered title matches the title it reads; otherwise its title goes through step 2. `Identification::Model`.
+
+Without a key the file never leaves the machine; Crossref only sees the identifiers and title taken from it. The search and model responses are kept in `source_records` (`crossref_search`, `anthropic`) next to the lookup's own records.
 
 ## Data on disk
 
@@ -84,7 +95,7 @@ The library directory is chosen on first launch. The chooser offers to create a 
 └── cache/              page thumbnails, extracted text; safe to delete
 ```
 
-Settings (recent libraries, window state, theme, contact email for API user agents, OpenAlex key) are stored separately in the platform config directory (`~/Library/Application Support/com.betty2310.paper` on macOS, `%APPDATA%\betty2310\paper\config` on Windows, `~/.config/paper` on Linux) as `settings.json`, so a library directory can be shared between machines without sharing machine settings. The sandboxed macOS app also stores a security scoped bookmark for each recent library next to the settings, because the sandbox forgets folder access between launches otherwise.
+Settings (recent libraries, window state, theme, contact email for API user agents, OpenAlex and Anthropic keys) are stored separately in the platform config directory (`~/Library/Application Support/com.betty2310.paper` on macOS, `%APPDATA%\betty2310\paper\config` on Windows, `~/.config/paper` on Linux) as `settings.json`, so a library directory can be shared between machines without sharing machine settings. The sandboxed macOS app also stores a security scoped bookmark for each recent library next to the settings, because the sandbox forgets folder access between launches otherwise.
 
 ## Database schema
 

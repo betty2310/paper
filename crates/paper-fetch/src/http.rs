@@ -67,10 +67,18 @@ impl Response {
     }
 }
 
-/// One GET at a time. Implemented by `UreqClient` and by test fakes.
+/// One request at a time. Implemented by `UreqClient` and by test fakes.
 pub trait HttpClient: Send + Sync {
     /// Performs a GET with the given extra headers, following redirects.
     fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Response, FetchError>;
+
+    /// Performs a POST of `body` with the given headers.
+    fn post(
+        &self,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> Result<Response, FetchError>;
 
     /// Like `get`, calling `progress(received, total)` as the body arrives.
     /// `total` is the `Content-Length`, when the server sent one. Clients that
@@ -123,52 +131,77 @@ impl HttpClient for UreqClient {
         self.download(url, headers, &mut |_, _| {})
     }
 
+    fn post(
+        &self,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> Result<Response, FetchError> {
+        let mut request = self.agent.post(url);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        let response = request.send(body).map_err(|error| network(&error))?;
+        read_response(response, &mut |_, _| {})
+    }
+
     fn download(
         &self,
         url: &str,
         headers: &[(&str, &str)],
         progress: &mut dyn FnMut(u64, Option<u64>),
     ) -> Result<Response, FetchError> {
-        let network = |error: &dyn std::fmt::Display| FetchError::Network {
-            message: error.to_string(),
-        };
         let mut request = self.agent.get(url);
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
-        let mut response = request.call().map_err(|error| network(&error))?;
-        let status = response.status().as_u16();
-        let header = |name: &str| {
-            response
-                .headers()
-                .get(name)
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_string)
-        };
-        let content_type = header("content-type");
-        let retry_after = header("retry-after").and_then(|value| value.trim().parse().ok());
-        // A compressed body's length says nothing about the bytes read here.
-        let total = header("content-length")
-            .filter(|_| header("content-encoding").is_none_or(|encoding| encoding == "identity"))
-            .and_then(|value| value.trim().parse().ok());
-        let mut reader = response.body_mut().with_config().limit(MAX_BODY).reader();
-        let mut body = Vec::with_capacity(total.unwrap_or(0).min(MAX_BODY) as usize);
-        let mut chunk = vec![0; CHUNK];
-        loop {
-            let read = reader.read(&mut chunk).map_err(|error| network(&error))?;
-            if read == 0 {
-                break;
-            }
-            body.extend_from_slice(&chunk[..read]);
-            progress(body.len() as u64, total);
-        }
-        Ok(Response {
-            status,
-            body,
-            content_type,
-            retry_after,
-        })
+        let response = request.call().map_err(|error| network(&error))?;
+        read_response(response, progress)
     }
+}
+
+fn network(error: &dyn std::fmt::Display) -> FetchError {
+    FetchError::Network {
+        message: error.to_string(),
+    }
+}
+
+/// Reads a response body in chunks, reporting progress after each one.
+fn read_response(
+    mut response: ureq::http::Response<ureq::Body>,
+    progress: &mut dyn FnMut(u64, Option<u64>),
+) -> Result<Response, FetchError> {
+    let status = response.status().as_u16();
+    let header = |name: &str| {
+        response
+            .headers()
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string)
+    };
+    let content_type = header("content-type");
+    let retry_after = header("retry-after").and_then(|value| value.trim().parse().ok());
+    // A compressed body's length says nothing about the bytes read here.
+    let total = header("content-length")
+        .filter(|_| header("content-encoding").is_none_or(|encoding| encoding == "identity"))
+        .and_then(|value| value.trim().parse().ok());
+    let mut reader = response.body_mut().with_config().limit(MAX_BODY).reader();
+    let mut body = Vec::with_capacity(total.unwrap_or(0).min(MAX_BODY) as usize);
+    let mut chunk = vec![0; CHUNK];
+    loop {
+        let read = reader.read(&mut chunk).map_err(|error| network(&error))?;
+        if read == 0 {
+            break;
+        }
+        body.extend_from_slice(&chunk[..read]);
+        progress(body.len() as u64, total);
+    }
+    Ok(Response {
+        status,
+        body,
+        content_type,
+        retry_after,
+    })
 }
 
 #[cfg(test)]

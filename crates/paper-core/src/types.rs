@@ -236,6 +236,32 @@ pub enum PdfStep {
     },
 }
 
+/// How `import_pdf` found which paper a file is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Identification {
+    /// The file prints its DOI or arXiv ID (or carries it in its metadata),
+    /// and the registered title is on page 1.
+    FileText,
+    /// The largest text on page 1 matched a title in Crossref. Titles can
+    /// collide, so the app may ask the user to check.
+    TitleSearch,
+    /// The model read page 1, and Crossref confirmed what it read.
+    Model,
+    /// Nothing matched. The item keeps the PDF and the title found in it; the
+    /// user can enter a DOI and look it up.
+    NotFound,
+    /// A request failed before anything matched, for example offline or with
+    /// a model API key that was not accepted. The item keeps the PDF.
+    Failed { message: String },
+}
+
+/// What `import_pdf` made: the item holding the PDF, and how it was found.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportedPdf {
+    pub item: ItemRow,
+    pub identification: Identification,
+}
+
 /// What the reader needs to open an attachment.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AttachmentFile {

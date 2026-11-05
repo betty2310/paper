@@ -8,6 +8,7 @@
 //!
 //! Nothing here knows about UniFFI or Swift. `paper-ffi` exports this API.
 
+mod import;
 mod pool;
 
 use std::collections::HashSet;
@@ -18,10 +19,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub use paper_core::{
-    AttachmentFile, AttachmentRow, CollectionNode, Creator, CreatorRole, ItemDetail, ItemFields,
-    ItemKind, ItemQuery, ItemRow, LookupStatus, MAX_RECENT_LIBRARIES, MetadataPatch, PaperError,
-    PdfStatus, PdfStep, RECENTLY_ADDED_DAYS, Scope, Settings, SortColumn, SourceRecord, Tag,
-    WindowState,
+    AttachmentFile, AttachmentRow, CollectionNode, Creator, CreatorRole, Identification,
+    ImportedPdf, ItemDetail, ItemFields, ItemKind, ItemQuery, ItemRow, LookupStatus,
+    MAX_RECENT_LIBRARIES, MetadataPatch, PaperError, PdfStatus, PdfStep, RECENTLY_ADDED_DAYS,
+    Scope, Settings, SortColumn, SourceRecord, Tag, WindowState,
 };
 use paper_core::{Library, SettingsStore};
 pub use paper_fetch::HttpClient;
@@ -40,6 +41,8 @@ type Result<T> = std::result::Result<T, PaperError>;
 type SharedObserver = Arc<Mutex<Option<Arc<dyn EngineObserver>>>>;
 /// Items whose PDF search is running, so one item never has two.
 type PdfSearches = Arc<Mutex<HashSet<String>>>;
+/// Batches of ids from `delete_items`, most recent last.
+type UndoBatches = Arc<Mutex<Vec<Vec<String>>>>;
 type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
 /// Events from the engine. An event caused by a synchronous call arrives on
@@ -86,8 +89,7 @@ pub struct Engine {
     pool: Mutex<Option<ThreadPool>>,
     /// Shared with lookup jobs, so `close` and `set_observer` reach them too.
     observer: SharedObserver,
-    /// Batches of ids from `delete_items`, most recent last.
-    undo: Mutex<Vec<Vec<String>>>,
+    undo: UndoBatches,
     pdf_searches: PdfSearches,
     manual_pdf_search: bool,
     closed: AtomicBool,
@@ -133,7 +135,7 @@ impl Engine {
             resolver: Arc::new(Resolver::new(http)),
             pool: Mutex::new(Some(ThreadPool::new(POOL_SIZE))),
             observer: Arc::new(Mutex::new(None)),
-            undo: Mutex::new(Vec::new()),
+            undo: Arc::new(Mutex::new(Vec::new())),
             pdf_searches: Arc::new(Mutex::new(HashSet::new())),
             manual_pdf_search: options.manual_pdf_search,
             closed: AtomicBool::new(false),
@@ -204,12 +206,7 @@ impl Engine {
                     .restore_items(std::slice::from_ref(&found.item_id))?;
                 self.library
                     .set_lookup_status(&found.item_id, LookupStatus::Pending)?;
-                // It is live again, so there is nothing left to undo for it.
-                let mut undo = self.undo.lock().unwrap();
-                for batch in undo.iter_mut() {
-                    batch.retain(|id| *id != found.item_id);
-                }
-                undo.retain(|batch| !batch.is_empty());
+                forget_undo(&self.undo, &found.item_id);
                 (found.item_id, false)
             }
             None => {
@@ -301,6 +298,38 @@ impl Engine {
                 item_id: fallback.item_id.clone(),
                 message: format!("the lookup crashed: {message}"),
             }),
+        }
+    }
+
+    /// Adds a paper from a PDF file, such as one dropped on the window.
+    ///
+    /// A row named after the file appears at once with a `Pending` lookup.
+    /// On an engine thread the engine then works out which paper the file is
+    /// (see `Identification`), fills in the metadata, and copies the PDF into
+    /// the library. The original file is left where it was.
+    ///
+    /// When nothing identifies the paper, the item stays with the PDF, the
+    /// title found in it, and a `Failed` lookup, so the user can enter a DOI.
+    /// When the paper is in the library already, its item gets the PDF if it
+    /// had none, the new row goes away, and `PaperError::Duplicate` names the
+    /// existing item. Fails with `NotPdf` for anything but a PDF.
+    pub async fn import_pdf(&self, path: &str) -> Result<ImportedPdf> {
+        self.ensure_open()?;
+        let settings = self.settings.settings();
+        let job = import::ImportJob {
+            library: Arc::clone(&self.library),
+            observer: Arc::clone(&self.observer),
+            resolver: Arc::clone(&self.resolver),
+            undo: Arc::clone(&self.undo),
+            contact: Contact::new(settings.contact_email),
+            api_key: Some(settings.anthropic_api_key.trim().to_string())
+                .filter(|key| !key.is_empty()),
+        };
+        let path = PathBuf::from(path);
+        match self.run(move || job.run(&path)).await {
+            Ok(outcome) => outcome,
+            Err(PoolError::Closed) => Err(PaperError::Closed),
+            Err(PoolError::Panicked(message)) => Err(PaperError::Io { message }),
         }
     }
 
@@ -631,6 +660,15 @@ impl Engine {
     fn notify(&self, call: impl FnOnce(&dyn EngineObserver)) {
         notify(&self.observer, call);
     }
+}
+
+/// Drops an item that is live again from the `undo_delete` batches.
+fn forget_undo(undo: &UndoBatches, item_id: &str) {
+    let mut undo = undo.lock().unwrap();
+    for batch in undo.iter_mut() {
+        batch.retain(|id| id != item_id);
+    }
+    undo.retain(|batch| !batch.is_empty());
 }
 
 fn notify(observer: &SharedObserver, call: impl FnOnce(&dyn EngineObserver)) {

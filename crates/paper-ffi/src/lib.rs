@@ -11,9 +11,9 @@ use std::time::SystemTime;
 
 use paper_engine as engine;
 use paper_engine::{
-    AttachmentFile, AttachmentRow, CollectionNode, Creator, CreatorRole, ItemDetail, ItemFields,
-    ItemKind, ItemQuery, ItemRow, LookupStatus, MetadataPatch, PaperError, PdfStatus, PdfStep,
-    Scope, Settings, SortColumn, Tag, WindowState,
+    AttachmentFile, AttachmentRow, CollectionNode, Creator, CreatorRole, Identification,
+    ImportedPdf, ItemDetail, ItemFields, ItemKind, ItemQuery, ItemRow, LookupStatus, MetadataPatch,
+    PaperError, PdfStatus, PdfStep, Scope, Settings, SortColumn, Tag, WindowState,
 };
 
 uniffi::setup_scaffolding!();
@@ -53,6 +53,15 @@ pub enum PdfStep {
         received_bytes: u64,
         total_bytes: Option<u64>,
     },
+}
+
+#[uniffi::remote(Enum)]
+pub enum Identification {
+    FileText,
+    TitleSearch,
+    Model,
+    NotFound,
+    Failed { message: String },
 }
 
 #[uniffi::remote(Enum)]
@@ -205,6 +214,12 @@ pub struct AttachmentRow {
 }
 
 #[uniffi::remote(Record)]
+pub struct ImportedPdf {
+    pub item: ItemRow,
+    pub identification: Identification,
+}
+
+#[uniffi::remote(Record)]
 pub struct AttachmentFile {
     pub id: String,
     pub item_id: String,
@@ -264,6 +279,7 @@ pub struct WindowState {
 pub struct Settings {
     pub contact_email: String,
     pub openalex_api_key: String,
+    pub anthropic_api_key: String,
     pub window: Option<WindowState>,
     pub sidebar_width: Option<f64>,
     pub detail_width: Option<f64>,
@@ -382,6 +398,10 @@ impl Engine {
 
     pub async fn retry_lookup(&self, item_id: String) -> Result<ItemRow, PaperError> {
         self.0.retry_lookup(&item_id).await
+    }
+
+    pub async fn import_pdf(&self, path: String) -> Result<ImportedPdf, PaperError> {
+        self.0.import_pdf(&path).await
     }
 
     pub fn update_metadata(&self, id: String, patch: MetadataPatch) -> Result<(), PaperError> {

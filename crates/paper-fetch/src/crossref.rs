@@ -18,6 +18,20 @@ pub fn work_url(doi: &str, email: Option<&str>) -> String {
     }
 }
 
+/// A bibliographic search for `query` (a title, optionally with an author),
+/// asking for the five best matches.
+pub fn search_url(query: &str, email: Option<&str>) -> String {
+    let mut url = format!(
+        "https://api.crossref.org/works?rows=5&select=DOI,title,type&query.bibliographic={}",
+        percent_encode_query_value(query)
+    );
+    if let Some(email) = email {
+        url.push_str("&mailto=");
+        url.push_str(&percent_encode_query_value(email));
+    }
+    url
+}
+
 /// Encodes a query value; `+` in an address would otherwise arrive as a space.
 fn percent_encode_query_value(text: &str) -> String {
     let mut out = String::with_capacity(text.len());

@@ -34,6 +34,10 @@ pub struct Settings {
     /// Crossref serves requests with an email from its faster polite pool.
     pub contact_email: String,
     pub openalex_api_key: String,
+    /// Anthropic API key. When set, `import_pdf` sends page 1 of a PDF that
+    /// does not print its identifier to a Claude model to read. Unset, PDFs
+    /// never leave the machine.
+    pub anthropic_api_key: String,
     pub window: Option<WindowState>,
     pub sidebar_width: Option<f64>,
     pub detail_width: Option<f64>,
