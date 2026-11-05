@@ -111,8 +111,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         window.layoutIfNeeded()
         let settings = store.settings
         let splitView = splitViewController.splitView
+        // The inspector first: moving its divider afterwards also took a few
+        // points from the sidebar. A divider's position is its leading edge, so
+        // the inspector's width excludes the divider's thickness.
+        splitView.setPosition(splitView.bounds.width - (settings.detailWidth ?? Theme.Size.inspectorWidth) - splitView.dividerThickness, ofDividerAt: 1)
         splitView.setPosition(settings.sidebarWidth ?? Theme.Size.sidebarWidth, ofDividerAt: 0)
-        splitView.setPosition(splitView.bounds.width - (settings.detailWidth ?? Theme.Size.inspectorWidth), ofDividerAt: 1)
     }
 
     private func updateTitle(scope: Scope, count: Int) {
