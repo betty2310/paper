@@ -3,34 +3,39 @@ import Combine
 import PaperEngine
 import SwiftUI
 
-/// `NSTableView` handles arrow keys and type select itself but drops Delete, so
-/// this table hands Delete and Forward Delete to the key binding system, which
-/// calls `deleteBackward`/`deleteForward` on the responder chain.
+/// `NSTableView` handles arrow keys and type select itself but drops Delete
+/// and Return, so this table hands Delete and Forward Delete to the key
+/// binding system, which calls `deleteBackward`/`deleteForward` on the
+/// responder chain, and opens the selected paper on Return.
 final class PaperTableView: NSTableView {
+    var onReturn: () -> Void = {}
+
     override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.function)
         let scalar = event.charactersIgnoringModifiers?.unicodeScalars.first
         if modifiers.isEmpty, scalar == UnicodeScalar(NSDeleteCharacter) || scalar == UnicodeScalar(NSDeleteFunctionKey) {
             interpretKeyEvents([event])
+        } else if modifiers.isEmpty, scalar == UnicodeScalar(NSCarriageReturnCharacter) || scalar == UnicodeScalar(NSEnterCharacter) {
+            onReturn()
         } else {
             super.keyDown(with: event)
         }
     }
 }
 
-/// The paper list: a view based table with two line rows, an empty state, and
-/// a notice bar at the bottom. Reads come from `LibraryStore`.
+/// The paper list: a view based table with two line rows and an empty state.
+/// Reads come from `LibraryStore`.
 @MainActor
 final class PaperListViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSMenuItemValidation {
     private static let cellIdentifier = NSUserInterfaceItemIdentifier("paperRow")
 
     let store: LibraryStore
     let tableView = PaperTableView()
+    /// Opens a paper's PDF: double click or Return on a row.
+    var onOpen: (String) -> Void = { _ in }
     private let scrollView = NSScrollView()
     private var emptyStateHost: NSHostingView<EmptyStateView>!
     private var filterHost: NSHostingView<FilterBar>!
-    private var noticeHost: NSHostingView<NoticeBar>!
-    private var noticeBottomConstraint: NSLayoutConstraint!
     private var subscriptions: Set<AnyCancellable> = []
     private var suppressSelectionChange = false
 
@@ -63,6 +68,9 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
         tableView.menu = makeContextMenu()
         tableView.setDraggingSourceOperationMask(.link, forLocal: true)
         tableView.setAccessibilityLabel("Papers")
+        tableView.target = self
+        tableView.doubleAction = #selector(rowDoubleClicked(_:))
+        tableView.onReturn = { [weak self] in self?.openSelection() }
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
@@ -71,18 +79,16 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
         emptyStateHost = NSHostingView(rootView: EmptyStateView(store: store))
         emptyStateHost.isHidden = true
         filterHost = NSHostingView(rootView: FilterBar(store: store))
-        noticeHost = NSHostingView(rootView: NoticeBar(store: store))
         // These hosts take their size from their content, but must never push
         // the list pane or the window around: the split view decides widths.
-        for host in [emptyStateHost, filterHost, noticeHost] as [NSView] {
+        for host in [emptyStateHost, filterHost] as [NSView] {
             (host as? NSHostingView<EmptyStateView>)?.sizingOptions = .intrinsicContentSize
             (host as? NSHostingView<FilterBar>)?.sizingOptions = .intrinsicContentSize
-            (host as? NSHostingView<NoticeBar>)?.sizingOptions = .intrinsicContentSize
             host.setContentHuggingPriority(.init(1), for: .horizontal)
             host.setContentCompressionResistancePriority(.init(1), for: .horizontal)
         }
 
-        for subview in [filterHost, scrollView, emptyStateHost, noticeHost] as [NSView] {
+        for subview in [filterHost, scrollView, emptyStateHost] as [NSView] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(subview)
         }
@@ -97,9 +103,6 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
             emptyStateHost.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             emptyStateHost.centerYAnchor.constraint(equalTo: root.centerYAnchor),
             emptyStateHost.widthAnchor.constraint(lessThanOrEqualTo: root.widthAnchor, constant: -Theme.Size.padding * 2),
-            noticeHost.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Theme.Size.padding),
-            noticeHost.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Theme.Size.padding),
-            noticeHost.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Theme.Size.padding),
         ])
         view = root
     }
@@ -110,12 +113,17 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
             .receive(on: DispatchQueue.main)
             .sink { [weak self] items in self?.reload(items) }
             .store(in: &subscriptions)
+        // PDF searches start and end without changing the rows themselves.
+        store.$pdfStatus
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshVisibleRows() }
+            .store(in: &subscriptions)
         store.$selectedItemIds
             .receive(on: DispatchQueue.main)
             .sink { [weak self] ids in
                 guard let self else { return }
                 selectRows(ids)
-                // When the app picks the rows (a finished add, the notice's
+                // When the app picks the rows (a finished add, a toast's
                 // Show button), keyboard focus follows so arrow keys and
                 // Delete act on them at once.
                 if !ids.isEmpty { view.window?.makeFirstResponder(tableView) }
@@ -142,6 +150,38 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
         scrollView.isHidden = items.isEmpty
     }
 
+    private func refreshVisibleRows() {
+        let visible = tableView.rows(in: tableView.visibleRect)
+        guard visible.length > 0 else { return }
+        for row in visible.location..<min(visible.location + visible.length, shownItems.count) {
+            (tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? PaperRowView)?
+                .configure(with: shownItems[row], pdfStatus: store.pdfStatus[shownItems[row].id])
+        }
+    }
+
+    // MARK: Opening
+
+    @objc private func rowDoubleClicked(_ sender: Any?) {
+        let row = tableView.clickedRow
+        guard row >= 0, row < shownItems.count else { return }
+        onOpen(shownItems[row].id)
+    }
+
+    private func openSelection() {
+        guard tableView.selectedRowIndexes.count == 1, let row = tableView.selectedRowIndexes.first else { return }
+        onOpen(shownItems[row].id)
+    }
+
+    /// The paper's row as it looks now, for the flight into its new tab.
+    func flightSource(itemId: String) -> TabFlight.Source? {
+        guard let row = shownItems.firstIndex(where: { $0.id == itemId }),
+              let rowView = tableView.rowView(atRow: row, makeIfNecessary: false),
+              let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? PaperRowView,
+              tableView.visibleRect.intersects(tableView.rect(ofRow: row))
+        else { return nil }
+        return TabFlight.capture(row: rowView, title: cell.titleField, titleFont: Theme.Font.rowTitle)
+    }
+
     private func selectRows(_ ids: [String]) {
         let wanted = IndexSet(shownItems.enumerated().filter { ids.contains($0.element.id) }.map(\.offset))
         guard wanted != tableView.selectedRowIndexes else { return }
@@ -166,7 +206,7 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
         guard !dois.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(dois.joined(separator: "\n"), forType: .string)
-        store.show(.init(kind: .info, message: dois.count == 1 ? "DOI copied." : "\(dois.count) DOIs copied.", actionTitle: nil, action: nil))
+        store.show(Toast(id: "copied", style: .done, message: dois.count == 1 ? "DOI copied" : "\(dois.count) DOIs copied"))
     }
 
     @objc func openPublisherPage(_ sender: Any?) {
@@ -211,6 +251,11 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
 
     private func makeContextMenu() -> NSMenu {
         let menu = NSMenu()
+        menu.addItem(withTitle: "Open PDF", action: #selector(MainWindowController.openSelectedPaper(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "Find PDF", action: #selector(MainWindowController.findPdf(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "Attach PDF…", action: #selector(MainWindowController.attachPdf(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "Reveal PDF in Finder", action: #selector(MainWindowController.revealPdf(_:)), keyEquivalent: "")
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Copy DOI", action: #selector(copyDOI(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Open Publisher Page", action: #selector(openPublisherPage(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Retry Lookup", action: #selector(retryLookup(_:)), keyEquivalent: "")
@@ -234,7 +279,7 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let cell = tableView.makeView(withIdentifier: Self.cellIdentifier, owner: self) as? PaperRowView
             ?? PaperRowView(identifier: Self.cellIdentifier)
-        cell.configure(with: shownItems[row])
+        cell.configure(with: shownItems[row], pdfStatus: store.pdfStatus[shownItems[row].id])
         return cell
     }
 
@@ -345,7 +390,10 @@ final class PaperRowView: NSTableCellView {
 
     private var lookupStatus: LookupStatus = .done
 
-    func configure(with item: ItemRow) {
+    /// The serif title, which flies into the tab when the PDF opens.
+    var titleField: NSTextField { title }
+
+    func configure(with item: ItemRow, pdfStatus: PdfStatus? = nil) {
         lookupStatus = item.lookupStatus
         added.stringValue = Self.addedFormatter.string(from: item.addedAt)
         switch item.lookupStatus {
@@ -366,9 +414,16 @@ final class PaperRowView: NSTableCellView {
             title.stringValue = item.title
             title.font = Theme.Font.rowTitle
             subtitle.stringValue = item.subtitle
-            status.image = item.hasPdf ? NSImage(systemSymbolName: Theme.Symbol.pdf, accessibilityDescription: "Has PDF") : nil
             status.contentTintColor = Theme.Color.secondaryText
-            spinner.stopAnimation(nil)
+            if !item.hasPdf, pdfStatus == .searching {
+                status.image = nil
+                status.toolTip = "Downloading the PDF"
+                spinner.startAnimation(nil)
+            } else {
+                status.image = item.hasPdf ? NSImage(systemSymbolName: Theme.Symbol.pdf, accessibilityDescription: "Has PDF") : nil
+                status.toolTip = item.hasPdf ? "Double click to read" : nil
+                spinner.stopAnimation(nil)
+            }
         }
         applyColors()
         setAccessibilityLabel("\(item.title). \(subtitle.stringValue)")
@@ -472,51 +527,5 @@ struct FilterBar: View {
             .background(Color(nsColor: Theme.Color.inspectorBackground))
             .overlay(alignment: .bottom) { Divider() }
         }
-    }
-}
-
-/// One line of feedback with an optional action, at the bottom of the list.
-struct NoticeBar: View {
-    @ObservedObject var store: LibraryStore
-
-    var body: some View {
-        VStack {
-            if let notice = store.notice {
-                noticeContent(notice)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .animation(.easeOut(duration: Theme.Duration.panel), value: store.notice)
-    }
-
-    private func noticeContent(_ notice: LibraryStore.Notice) -> some View {
-            HStack(spacing: Theme.Size.gap) {
-                Image(systemName: notice.kind == .error ? Theme.Symbol.failed : "checkmark.circle.fill")
-                    .foregroundStyle(notice.kind == .error ? Theme.Color.swiftUIWarning : Theme.Color.swiftUIAccent)
-                Text(notice.message)
-                    .font(Theme.Font.swiftUIBody)
-                    .lineLimit(2)
-                Spacer(minLength: 0)
-                if let title = notice.actionTitle, let action = notice.action {
-                    Button(title, action: action)
-                        .controlSize(.small)
-                }
-                Button {
-                    store.dismissNotice()
-                } label: {
-                    Image(systemName: Theme.Symbol.close)
-                }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
-                .accessibilityLabel("Dismiss")
-            }
-            .padding(.horizontal, Theme.Size.padding)
-            .padding(.vertical, Theme.Size.gap + Theme.Size.smallGap)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Size.cardRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Size.cardRadius, style: .continuous)
-                    .strokeBorder(Theme.Color.swiftUISeparator)
-            )
-            .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
     }
 }

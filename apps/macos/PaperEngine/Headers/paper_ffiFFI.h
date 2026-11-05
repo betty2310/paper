@@ -271,6 +271,20 @@ typedef void (*UniffiCallbackInterfaceEngineObserverMethod3)(uint64_t, RustBuffe
     );
 
 #endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_ENGINE_OBSERVER_METHOD4
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_ENGINE_OBSERVER_METHOD4
+typedef void (*UniffiCallbackInterfaceEngineObserverMethod4)(uint64_t, RustBuffer, RustBuffer, void* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_ENGINE_OBSERVER_METHOD5
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_ENGINE_OBSERVER_METHOD5
+typedef void (*UniffiCallbackInterfaceEngineObserverMethod5)(uint64_t, RustBuffer, RustBuffer, void* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
 #ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_ENGINE_OBSERVER
 #define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_ENGINE_OBSERVER
 typedef struct UniffiVTableCallbackInterfaceEngineObserver {
@@ -280,6 +294,8 @@ typedef struct UniffiVTableCallbackInterfaceEngineObserver {
     UniffiCallbackInterfaceEngineObserverMethod1 _Nonnull collectionsChanged;
     UniffiCallbackInterfaceEngineObserverMethod2 _Nonnull tagsChanged;
     UniffiCallbackInterfaceEngineObserverMethod3 _Nonnull lookupProgress;
+    UniffiCallbackInterfaceEngineObserverMethod4 _Nonnull pdfProgress;
+    UniffiCallbackInterfaceEngineObserverMethod5 _Nonnull pdfStep;
 } UniffiVTableCallbackInterfaceEngineObserver;
 
 #endif
@@ -313,6 +329,16 @@ uint64_t uniffi_paper_ffi_fn_method_engine_add_by_identifier(uint64_t ptr, RustB
 void uniffi_paper_ffi_fn_method_engine_add_to_collection(uint64_t ptr, RustBuffer collection_id, RustBuffer item_ids, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_ATTACH_FILE
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_ATTACH_FILE
+uint64_t uniffi_paper_ffi_fn_method_engine_attach_file(uint64_t ptr, RustBuffer item_id, RustBuffer path
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_ATTACHMENT_FILE
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_ATTACHMENT_FILE
+RustBuffer uniffi_paper_ffi_fn_method_engine_attachment_file(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_CAN_UNDO_DELETE
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_CAN_UNDO_DELETE
 int8_t uniffi_paper_ffi_fn_method_engine_can_undo_delete(uint64_t ptr, RustCallStatus *_Nonnull out_status
@@ -341,6 +367,11 @@ void uniffi_paper_ffi_fn_method_engine_delete_collection(uint64_t ptr, RustBuffe
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_DELETE_ITEMS
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_DELETE_ITEMS
 void uniffi_paper_ffi_fn_method_engine_delete_items(uint64_t ptr, RustBuffer ids, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_FIND_PDF
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_FIND_PDF
+uint64_t uniffi_paper_ffi_fn_method_engine_find_pdf(uint64_t ptr, RustBuffer item_id
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_ITEM_DETAIL
@@ -396,6 +427,11 @@ void uniffi_paper_ffi_fn_method_engine_save_note(uint64_t ptr, RustBuffer item_i
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SET_OBSERVER
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SET_OBSERVER
 void uniffi_paper_ffi_fn_method_engine_set_observer(uint64_t ptr, uint64_t observer, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SET_READING_POSITION
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SET_READING_POSITION
+void uniffi_paper_ffi_fn_method_engine_set_reading_position(uint64_t ptr, RustBuffer id, int32_t page, double zoom, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SET_TAG_COLOR
@@ -466,6 +502,16 @@ void uniffi_paper_ffi_fn_method_engineobserver_tags_changed(uint64_t ptr, RustCa
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINEOBSERVER_LOOKUP_PROGRESS
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINEOBSERVER_LOOKUP_PROGRESS
 void uniffi_paper_ffi_fn_method_engineobserver_lookup_progress(uint64_t ptr, RustBuffer item_id, RustBuffer status, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINEOBSERVER_PDF_PROGRESS
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINEOBSERVER_PDF_PROGRESS
+void uniffi_paper_ffi_fn_method_engineobserver_pdf_progress(uint64_t ptr, RustBuffer item_id, RustBuffer status, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINEOBSERVER_PDF_STEP
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINEOBSERVER_PDF_STEP
+void uniffi_paper_ffi_fn_method_engineobserver_pdf_step(uint64_t ptr, RustBuffer item_id, RustBuffer step, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_FUNC_IS_LIBRARY
@@ -786,6 +832,18 @@ uint16_t uniffi_paper_ffi_checksum_method_engine_add_to_collection(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_ATTACH_FILE
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_ATTACH_FILE
+uint16_t uniffi_paper_ffi_checksum_method_engine_attach_file(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_ATTACHMENT_FILE
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_ATTACHMENT_FILE
+uint16_t uniffi_paper_ffi_checksum_method_engine_attachment_file(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_CAN_UNDO_DELETE
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_CAN_UNDO_DELETE
 uint16_t uniffi_paper_ffi_checksum_method_engine_can_undo_delete(void
@@ -819,6 +877,12 @@ uint16_t uniffi_paper_ffi_checksum_method_engine_delete_collection(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_DELETE_ITEMS
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_DELETE_ITEMS
 uint16_t uniffi_paper_ffi_checksum_method_engine_delete_items(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_FIND_PDF
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_FIND_PDF
+uint16_t uniffi_paper_ffi_checksum_method_engine_find_pdf(void
     
 );
 #endif
@@ -888,6 +952,12 @@ uint16_t uniffi_paper_ffi_checksum_method_engine_set_observer(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_SET_READING_POSITION
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_SET_READING_POSITION
+uint16_t uniffi_paper_ffi_checksum_method_engine_set_reading_position(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_SET_TAG_COLOR
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_SET_TAG_COLOR
 uint16_t uniffi_paper_ffi_checksum_method_engine_set_tag_color(void
@@ -951,6 +1021,18 @@ uint16_t uniffi_paper_ffi_checksum_method_engineobserver_tags_changed(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINEOBSERVER_LOOKUP_PROGRESS
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINEOBSERVER_LOOKUP_PROGRESS
 uint16_t uniffi_paper_ffi_checksum_method_engineobserver_lookup_progress(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINEOBSERVER_PDF_PROGRESS
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINEOBSERVER_PDF_PROGRESS
+uint16_t uniffi_paper_ffi_checksum_method_engineobserver_pdf_progress(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINEOBSERVER_PDF_STEP
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINEOBSERVER_PDF_STEP
+uint16_t uniffi_paper_ffi_checksum_method_engineobserver_pdf_step(void
     
 );
 #endif

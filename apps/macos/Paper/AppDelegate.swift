@@ -279,6 +279,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         find.isHidden = true
 
         let paperMenu = NSMenu(title: "Paper")
+        let openItem = paperMenu.addItem(withTitle: "Open PDF", action: #selector(MainWindowController.openSelectedPaper(_:)), keyEquivalent: String(Character(UnicodeScalar(NSDownArrowFunctionKey)!)))
+        openItem.keyEquivalentModifierMask = [.command]
+        paperMenu.addItem(withTitle: "Find PDF", action: #selector(MainWindowController.findPdf(_:)), keyEquivalent: "")
+        paperMenu.addItem(withTitle: "Attach PDF…", action: #selector(MainWindowController.attachPdf(_:)), keyEquivalent: "")
+        paperMenu.addItem(withTitle: "Reveal PDF in Finder", action: #selector(MainWindowController.revealPdf(_:)), keyEquivalent: "")
+        paperMenu.addItem(.separator())
         paperMenu.addItem(withTitle: "Copy DOI", action: #selector(PaperListViewController.copyDOI(_:)), keyEquivalent: "")
         paperMenu.addItem(withTitle: "Open Publisher Page", action: #selector(PaperListViewController.openPublisherPage(_:)), keyEquivalent: "")
         paperMenu.addItem(withTitle: "Retry Lookup", action: #selector(PaperListViewController.retryLookup(_:)), keyEquivalent: "")
@@ -297,12 +303,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let inspectorItem = viewMenu.addItem(withTitle: "Hide Inspector", action: #selector(MainWindowController.toggleInspector(_:)), keyEquivalent: "i")
         inspectorItem.keyEquivalentModifierMask = [.command, .option]
         viewMenu.addItem(.separator())
+        viewMenu.addItem(withTitle: "Zoom In", action: #selector(MainWindowController.zoomIn(_:)), keyEquivalent: "+")
+        viewMenu.addItem(withTitle: "Zoom Out", action: #selector(MainWindowController.zoomOut(_:)), keyEquivalent: "-")
+        viewMenu.addItem(withTitle: "Fit Width", action: #selector(MainWindowController.zoomToFitWidth(_:)), keyEquivalent: "0")
+        viewMenu.addItem(.separator())
         let fullScreen = viewMenu.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         fullScreen.keyEquivalentModifierMask = [.command, .control]
 
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(withTitle: "Show Previous Tab", action: #selector(MainWindowController.showPreviousTab(_:)), keyEquivalent: "{")
+        windowMenu.addItem(withTitle: "Show Next Tab", action: #selector(MainWindowController.showNextTab(_:)), keyEquivalent: "}")
         windowMenu.addItem(.separator())
         windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
         NSApp.windowsMenu = windowMenu

@@ -10,18 +10,22 @@
 
 mod pool;
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 pub use paper_core::{
-    AttachmentRow, CollectionNode, Creator, CreatorRole, ItemDetail, ItemFields, ItemKind,
-    ItemQuery, ItemRow, LookupStatus, MAX_RECENT_LIBRARIES, MetadataPatch, PaperError,
-    RECENTLY_ADDED_DAYS, Scope, Settings, SortColumn, SourceRecord, Tag, WindowState,
+    AttachmentFile, AttachmentRow, CollectionNode, Creator, CreatorRole, ItemDetail, ItemFields,
+    ItemKind, ItemQuery, ItemRow, LookupStatus, MAX_RECENT_LIBRARIES, MetadataPatch, PaperError,
+    PdfStatus, PdfStep, RECENTLY_ADDED_DAYS, Scope, Settings, SortColumn, SourceRecord, Tag,
+    WindowState,
 };
 use paper_core::{Library, SettingsStore};
 pub use paper_fetch::HttpClient;
-use paper_fetch::{Contact, FetchError, Resolver, UreqClient};
+use paper_fetch::{Contact, FetchError, PdfQuery, Resolver, UreqClient};
 pub use paper_ids::Identifier;
 
 use crate::pool::{PoolError, ThreadPool};
@@ -34,6 +38,9 @@ const MAX_UNDO_BATCHES: usize = 100;
 type Result<T> = std::result::Result<T, PaperError>;
 
 type SharedObserver = Arc<Mutex<Option<Arc<dyn EngineObserver>>>>;
+/// Items whose PDF search is running, so one item never has two.
+type PdfSearches = Arc<Mutex<HashSet<String>>>;
+type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
 /// Events from the engine. An event caused by a synchronous call arrives on
 /// the caller's thread before that call returns; everything a lookup does
@@ -49,6 +56,13 @@ pub trait EngineObserver: Send + Sync {
     fn tags_changed(&self);
     /// A metadata lookup for an item started, finished, or failed.
     fn lookup_progress(&self, item_id: String, status: LookupStatus);
+    /// The open access PDF search for an item started, found a PDF, found
+    /// none, or failed. `items_changed` follows a found PDF.
+    fn pdf_progress(&self, item_id: String, status: PdfStatus);
+    /// A running PDF search moved on: it asks another source, or more of the
+    /// file arrived. Download steps come at most every `PDF_STEP_INTERVAL`,
+    /// plus the last one.
+    fn pdf_step(&self, item_id: String, step: PdfStep);
 }
 
 /// How an engine is built. Tests swap the settings directory and the HTTP
@@ -59,6 +73,9 @@ pub struct EngineOptions {
     pub settings_dir: Option<PathBuf>,
     /// The HTTP client for lookups. Default: `ureq` with the platform roots.
     pub http: Option<Arc<dyn HttpClient>>,
+    /// Do not search for a PDF after a lookup; only `find_pdf` does. Tests
+    /// that count requests or events use it.
+    pub manual_pdf_search: bool,
 }
 
 /// One open library.
@@ -71,6 +88,8 @@ pub struct Engine {
     observer: SharedObserver,
     /// Batches of ids from `delete_items`, most recent last.
     undo: Mutex<Vec<Vec<String>>>,
+    pdf_searches: PdfSearches,
+    manual_pdf_search: bool,
     closed: AtomicBool,
 }
 
@@ -115,6 +134,8 @@ impl Engine {
             pool: Mutex::new(Some(ThreadPool::new(POOL_SIZE))),
             observer: Arc::new(Mutex::new(None)),
             undo: Mutex::new(Vec::new()),
+            pdf_searches: Arc::new(Mutex::new(HashSet::new())),
+            manual_pdf_search: options.manual_pdf_search,
             closed: AtomicBool::new(false),
         })
     }
@@ -260,6 +281,18 @@ impl Engine {
             .run(move || job.run(resolver.lookup(&identifier, &contact), placeholder))
             .await
         {
+            Ok(Ok(row)) => {
+                // The PDF search runs on its own; the caller only waits for
+                // the metadata. Its progress arrives through the observer.
+                if !self.manual_pdf_search && !row.has_pdf {
+                    match self.start_pdf_search(&row.id) {
+                        Ok(PdfSearch::Running(search)) => drop(search),
+                        Ok(PdfSearch::Attached(_)) => {}
+                        Err(error) => tracing::info!(%error, "no PDF search after the lookup"),
+                    }
+                }
+                Ok(row)
+            }
             Ok(outcome) => outcome,
             Err(PoolError::Closed) => Err(PaperError::Closed),
             // The job died before it could mark the row, so do that here.
@@ -332,6 +365,134 @@ impl Engine {
     /// Whether `undo_delete` has something to restore.
     pub fn can_undo_delete(&self) -> bool {
         !self.undo.lock().unwrap().is_empty()
+    }
+
+    // ----- attachments -----
+
+    /// Looks for an open access PDF (arXiv, OpenAlex, Unpaywall, Europe PMC),
+    /// downloads it into the library, and attaches it. Adding a paper starts
+    /// this on its own; the app calls it to search again. An item that has a
+    /// PDF already returns it without touching the network.
+    ///
+    /// Fails with `PdfNotFound` when no source offers one, and with `Network`
+    /// when the search could not finish.
+    pub async fn find_pdf(&self, item_id: &str) -> Result<AttachmentRow> {
+        match self.start_pdf_search(item_id)? {
+            PdfSearch::Attached(row) => Ok(row),
+            PdfSearch::Running(search) => search.await,
+        }
+    }
+
+    /// Queues the PDF search on the pool at once, so dropping the returned
+    /// future does not cancel it.
+    fn start_pdf_search(&self, item_id: &str) -> Result<PdfSearch> {
+        self.ensure_open()?;
+        let detail = self.library.item(item_id)?;
+        if let Some(pdf) = detail.attachments.iter().find(|a| a.mime == PDF_MIME) {
+            return Ok(PdfSearch::Attached(pdf.clone()));
+        }
+        if detail.fields.doi.is_none() && detail.fields.arxiv_id.is_none() {
+            return Err(PaperError::PdfNotFound {
+                item_id: item_id.to_string(),
+            });
+        }
+        if !self
+            .pdf_searches
+            .lock()
+            .unwrap()
+            .insert(item_id.to_string())
+        {
+            return Err(PaperError::Library {
+                message: "Paper is already looking for this PDF.".to_string(),
+            });
+        }
+        let settings = self.settings.settings();
+        let job = PdfJob {
+            library: Arc::clone(&self.library),
+            observer: Arc::clone(&self.observer),
+            searches: Arc::clone(&self.pdf_searches),
+            item_id: item_id.to_string(),
+        };
+        let query = PdfQuery {
+            doi: detail.fields.doi,
+            arxiv_id: detail.fields.arxiv_id,
+            openalex_api_key: Some(settings.openalex_api_key).filter(|key| !key.is_empty()),
+        };
+        let contact = Contact::new(settings.contact_email);
+        job.report(PdfStatus::Searching);
+        let fallback = job.clone();
+        let resolver = Arc::clone(&self.resolver);
+        let running = self.run(move || job.run(&resolver, &query, &contact));
+        Ok(PdfSearch::Running(Box::pin(async move {
+            match running.await {
+                Ok(outcome) => outcome,
+                Err(PoolError::Closed) => {
+                    fallback.finish();
+                    Err(PaperError::Closed)
+                }
+                Err(PoolError::Panicked(message)) => {
+                    fallback.finish();
+                    fallback.report(PdfStatus::Failed);
+                    Err(PaperError::Network { message })
+                }
+            }
+        })))
+    }
+
+    /// Copies a PDF the user chose into the library and attaches it. The
+    /// original file is left where it was.
+    pub async fn attach_file(&self, item_id: &str, path: &str) -> Result<AttachmentRow> {
+        self.ensure_open()?;
+        let library = Arc::clone(&self.library);
+        let observer = Arc::clone(&self.observer);
+        let item_id = item_id.to_string();
+        let path = PathBuf::from(path);
+        let outcome = self
+            .run(move || {
+                let bytes = std::fs::read(&path)?;
+                if !paper_fetch::is_pdf(&bytes) {
+                    return Err(PaperError::NotPdf {
+                        path: path.display().to_string(),
+                    });
+                }
+                let row = library.add_pdf(&item_id, &bytes, None)?;
+                notify(&observer, |observer| {
+                    observer.items_changed(vec![item_id.clone()])
+                });
+                Ok(row)
+            })
+            .await;
+        match outcome {
+            Ok(outcome) => outcome,
+            Err(PoolError::Closed) => Err(PaperError::Closed),
+            Err(PoolError::Panicked(message)) => Err(PaperError::Io { message }),
+        }
+    }
+
+    /// Where an attachment's file is and where the reader left it.
+    pub fn attachment_file(&self, id: &str) -> Result<AttachmentFile> {
+        self.ensure_open()?;
+        let row = self.library.attachment(id)?;
+        Ok(AttachmentFile {
+            path: self.library.attachment_path(&row).display().to_string(),
+            id: row.id,
+            item_id: row.item_id,
+            last_page: row.last_page,
+            last_zoom: row.last_zoom,
+        })
+    }
+
+    /// Remembers the reader's page (0 based) and zoom for an attachment. The
+    /// first call takes the item out of the Unread list, so only that one
+    /// tells the observer.
+    pub fn set_reading_position(&self, id: &str, page: i32, zoom: f64) -> Result<()> {
+        self.ensure_open()?;
+        let before = self.library.attachment(id)?;
+        self.library.set_reading_position(id, page, zoom)?;
+        if before.last_page.is_none() {
+            self.notify(|observer| observer.items_changed(vec![before.item_id.clone()]));
+        }
+        Ok(())
     }
 
     // ----- collections -----
@@ -563,6 +724,102 @@ impl LookupJob {
             observer.items_changed(vec![self.item_id.clone()])
         });
         Err(error)
+    }
+}
+
+const PDF_MIME: &str = "application/pdf";
+
+/// The shortest time between two download progress events for one search.
+pub const PDF_STEP_INTERVAL: Duration = Duration::from_millis(50);
+
+enum PdfSearch {
+    /// The item has a PDF already.
+    Attached(AttachmentRow),
+    /// The search is queued; the future resolves with the attached PDF.
+    Running(BoxFuture<Result<AttachmentRow>>),
+}
+
+/// The part of a PDF search that runs on an engine thread: the requests, the
+/// download, the file write, and the events.
+#[derive(Clone)]
+struct PdfJob {
+    library: Arc<Library>,
+    observer: SharedObserver,
+    searches: PdfSearches,
+    item_id: String,
+}
+
+impl PdfJob {
+    fn run(
+        &self,
+        resolver: &Resolver,
+        query: &PdfQuery,
+        contact: &Contact,
+    ) -> Result<AttachmentRow> {
+        let mut last_download: Option<Instant> = None;
+        let search = resolver.find_pdf(query, contact, &mut |step| {
+            if let PdfStep::Downloading {
+                received_bytes,
+                total_bytes,
+                ..
+            } = &step
+            {
+                let finished = Some(*received_bytes) == *total_bytes;
+                let now = Instant::now();
+                if !finished && last_download.is_some_and(|last| now - last < PDF_STEP_INTERVAL) {
+                    return;
+                }
+                last_download = Some(now);
+            }
+            notify(&self.observer, |observer| {
+                observer.pdf_step(self.item_id.clone(), step)
+            });
+        });
+        for record in &search.records {
+            if let Err(error) =
+                self.library
+                    .put_source_record(&self.item_id, &record.source, &record.json)
+            {
+                tracing::warn!(%error, source = record.source, "could not keep a source record");
+            }
+        }
+        let outcome = match search.result {
+            Ok(found) => self
+                .library
+                .add_pdf(&self.item_id, &found.bytes, Some(&found.url)),
+            Err(FetchError::NoPdf { .. }) => Err(PaperError::PdfNotFound {
+                item_id: self.item_id.clone(),
+            }),
+            Err(error) => Err(PaperError::Network {
+                message: error.to_string(),
+            }),
+        };
+        self.finish();
+        match &outcome {
+            Ok(_) => {
+                self.report(PdfStatus::Found);
+                notify(&self.observer, |observer| {
+                    observer.items_changed(vec![self.item_id.clone()])
+                });
+            }
+            Err(PaperError::PdfNotFound { .. }) => self.report(PdfStatus::NotFound),
+            Err(error) => {
+                tracing::warn!(item_id = %self.item_id, %error, "PDF search failed");
+                self.report(PdfStatus::Failed);
+            }
+        }
+        outcome
+    }
+
+    fn report(&self, status: PdfStatus) {
+        notify(&self.observer, |observer| {
+            observer.pdf_progress(self.item_id.clone(), status)
+        });
+    }
+
+    /// Lets a later search for the same item start.
+    fn finish(&self) {
+        self.searches.lock().unwrap().remove(&self.item_id);
     }
 }
 

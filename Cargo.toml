@@ -32,6 +32,7 @@ directories = "6"
 tracing = "0.1"
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier", "gzip"] }
 tempfile = "3"
+sha2 = "0.10"
 pollster = "0.4"
 
 [profile.release]

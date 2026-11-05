@@ -108,6 +108,9 @@ struct ItemDetailView: View {
                     lookupFailed
                 }
                 actions
+                if detail.lookupStatus == .done {
+                    section("PDF") { pdf }
+                }
                 if let abstractText = detail.fields.abstractText, !abstractText.isEmpty {
                     section("Abstract") {
                         Text(abstractText)
@@ -208,13 +211,21 @@ struct ItemDetailView: View {
         .background(Theme.Color.swiftUICard, in: RoundedRectangle(cornerRadius: Theme.Size.cardRadius, style: .continuous))
     }
 
+    private var pdfAttachment: AttachmentRow? {
+        detail.attachments.first { $0.mime == "application/pdf" }
+    }
+
+    private func openPDF() {
+        NSApp.sendAction(#selector(MainWindowController.openSelectedPaper(_:)), to: nil, from: nil)
+    }
+
     private var actions: some View {
         HStack(spacing: Theme.Size.gap) {
             if let doi = detail.fields.doi {
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(doi, forType: .string)
-                    store.show(.init(kind: .info, message: "DOI copied.", actionTitle: nil, action: nil))
+                    store.show(Toast(id: "copied", style: .done, message: "DOI copied"))
                 } label: {
                     Label("Copy DOI", systemImage: Theme.Symbol.copy)
                 }
@@ -233,6 +244,10 @@ struct ItemDetailView: View {
                 }
                 Button("Retry Lookup") { store.retryLookup(itemId: detail.id) }
                     .disabled(detail.lookupStatus == .pending)
+                Button("Attach PDF…") { store.chooseFileToAttach(itemId: detail.id) }
+                if let attachment = pdfAttachment {
+                    Button("Reveal PDF in Finder") { store.revealAttachment(id: attachment.id) }
+                }
                 Divider()
                 Button("Delete", role: .destructive) { store.delete(itemIds: [detail.id]) }
             } label: {
@@ -257,6 +272,82 @@ struct ItemDetailView: View {
                 .textCase(.uppercase)
                 .padding(.top, Theme.Size.smallGap)
             content()
+        }
+    }
+
+    /// The attached PDF, or where the search for one is.
+    @ViewBuilder
+    private var pdf: some View {
+        if let attachment = pdfAttachment {
+            HStack(spacing: Theme.Size.gap) {
+                Image(systemName: Theme.Symbol.pdf)
+                    .font(Theme.Font.swiftUIPaletteIcon)
+                    .foregroundStyle(Theme.Color.swiftUIAccent)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(URL(fileURLWithPath: attachment.relativePath).lastPathComponent)
+                        .font(Theme.Font.swiftUIBody)
+                        .foregroundStyle(Theme.Color.swiftUIText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text(ByteCountFormatter.string(fromByteCount: attachment.byteSize, countStyle: .file))
+                        .font(Theme.Font.swiftUICaption)
+                        .foregroundStyle(Theme.Color.swiftUISecondaryText)
+                }
+                Spacer(minLength: 0)
+                Button("Open", action: openPDF)
+                    .buttonStyle(.borderedProminent)
+                    .help("Read the PDF in a new tab (⌘↓)")
+            }
+            .padding(Theme.Size.gap + Theme.Size.smallGap)
+            .background(Theme.Color.swiftUICard, in: RoundedRectangle(cornerRadius: Theme.Size.cardRadius, style: .continuous))
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2, perform: openPDF)
+            .help("Double click to read")
+            .contextMenu {
+                Button("Open PDF", action: openPDF)
+                Button("Reveal in Finder") { store.revealAttachment(id: attachment.id) }
+            }
+        } else {
+            switch store.pdfStatus[detail.id] {
+            case .searching:
+                HStack(spacing: Theme.Size.gap) {
+                    ProgressView().controlSize(.small)
+                    Text("Downloading the open access PDF…")
+                        .font(Theme.Font.swiftUISecondary)
+                        .foregroundStyle(Theme.Color.swiftUISecondaryText)
+                }
+            case .notFound:
+                pdfMissing("No open access PDF was found.", retryTitle: "Search Again")
+            case .failed:
+                pdfMissing("The PDF could not be downloaded.", retryTitle: "Try Again")
+            case .found, nil:
+                pdfMissing(nil, retryTitle: "Find PDF")
+            }
+        }
+    }
+
+    private func pdfMissing(_ message: String?, retryTitle: String) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Size.gap) {
+            if let message {
+                Text(message)
+                    .font(Theme.Font.swiftUISecondary)
+                    .foregroundStyle(Theme.Color.swiftUISecondaryText)
+            }
+            HStack(spacing: Theme.Size.gap) {
+                Button {
+                    store.findPdf(itemId: detail.id)
+                } label: {
+                    Label(retryTitle, systemImage: Theme.Symbol.findPdf)
+                }
+                .help("Look for an open access PDF in arXiv, OpenAlex, Unpaywall, and Europe PMC")
+                Button {
+                    store.chooseFileToAttach(itemId: detail.id)
+                } label: {
+                    Label("Attach…", systemImage: Theme.Symbol.attach)
+                }
+                .help("Copy a PDF from your Mac into the library")
+            }
+            .controlSize(.small)
         }
     }
 

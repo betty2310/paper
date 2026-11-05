@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use paper_engine::{
     Engine, EngineObserver, EngineOptions, ItemKind, ItemQuery, LookupStatus, MetadataPatch,
-    PaperError, Scope,
+    PaperError, PdfStatus, PdfStep, Scope,
 };
 use paper_fetch::testing::FakeHttp;
 use pollster::block_on;
@@ -30,6 +30,8 @@ enum Event {
     Collections,
     Tags,
     Lookup(String, LookupStatus),
+    Pdf(String, PdfStatus),
+    Step(String, PdfStep),
 }
 
 /// Records every event with the thread it arrived on.
@@ -66,6 +68,12 @@ impl EngineObserver for Recorder {
     fn lookup_progress(&self, item_id: String, status: LookupStatus) {
         self.push(Event::Lookup(item_id, status));
     }
+    fn pdf_progress(&self, item_id: String, status: PdfStatus) {
+        self.push(Event::Pdf(item_id, status));
+    }
+    fn pdf_step(&self, item_id: String, step: PdfStep) {
+        self.push(Event::Step(item_id, step));
+    }
 }
 
 struct Harness {
@@ -76,6 +84,12 @@ struct Harness {
 }
 
 fn harness() -> Harness {
+    harness_with(true)
+}
+
+/// `manual_pdf_search: false` is what the app runs with: every added paper
+/// starts a PDF search on its own.
+fn harness_with(manual_pdf_search: bool) -> Harness {
     let dir = tempfile::tempdir().unwrap();
     let http = Arc::new(FakeHttp::new());
     http.route(
@@ -90,6 +104,7 @@ fn harness() -> Harness {
         EngineOptions {
             settings_dir: Some(dir.path().join("settings")),
             http: Some(http.clone()),
+            manual_pdf_search,
         },
     )
     .unwrap();
@@ -479,6 +494,7 @@ fn a_read_only_settings_directory_does_not_keep_the_library_closed() {
         EngineOptions {
             settings_dir: Some(not_a_dir.clone()),
             http: Some(Arc::new(FakeHttp::new())),
+            manual_pdf_search: true,
         },
     )
     .expect("the library opens even if the recent list cannot be written");
@@ -655,6 +671,7 @@ fn libraries_are_remembered_and_reopen_with_their_data() {
     let options = || EngineOptions {
         settings_dir: Some(settings_dir.clone()),
         http: None,
+        manual_pdf_search: true,
     };
     let a = dir.path().join("A");
     let b = dir.path().join("B");
@@ -699,4 +716,249 @@ fn libraries_are_remembered_and_reopen_with_their_data() {
         [a.to_string_lossy().into_owned()],
         "missing folders are left out"
     );
+}
+
+const ARXIV_PDF_ATTENTION: &str = "https://arxiv.org/pdf/1706.03762v7";
+const OPENALEX_DEEP_LEARNING: &str =
+    "https://api.openalex.org/works/https://doi.org/10.1038/nature14539";
+
+/// Waits until the observer has seen `event`, then returns everything so far.
+fn wait_for(events: &Recorder, event: &Event) -> Vec<Event> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut seen = Vec::new();
+    loop {
+        seen.extend(events.take());
+        if seen.contains(event) {
+            return seen;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "never saw {event:?}, only {seen:?}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn pdf_response(body: &[u8]) -> paper_fetch::Response {
+    paper_fetch::Response {
+        status: 200,
+        body: body.to_vec(),
+        content_type: Some("application/pdf".into()),
+        retry_after: None,
+    }
+}
+
+#[test]
+fn adding_a_paper_downloads_its_open_access_pdf_on_its_own() {
+    let h = harness_with(false);
+    h.http.route_responses(
+        ARXIV_PDF_ATTENTION,
+        vec![pdf_response(b"%PDF-1.5 attention")],
+    );
+
+    let row = block_on(h.engine.add_by_identifier("arXiv:1706.03762v7")).unwrap();
+    assert!(
+        !row.has_pdf,
+        "add returns with the metadata, before the PDF"
+    );
+
+    let events = wait_for(&h.events, &Event::Pdf(row.id.clone(), PdfStatus::Found));
+    let pdf_events: Vec<&Event> = events
+        .iter()
+        .filter(|event| matches!(event, Event::Pdf(..)))
+        .collect();
+    assert_eq!(
+        pdf_events,
+        [
+            &Event::Pdf(row.id.clone(), PdfStatus::Searching),
+            &Event::Pdf(row.id.clone(), PdfStatus::Found)
+        ]
+    );
+    let detail = h.engine.item_detail(&row.id).unwrap();
+    assert_eq!(detail.attachments.len(), 1);
+    let file = h.engine.attachment_file(&detail.attachments[0].id).unwrap();
+    assert!(
+        file.path.ends_with("/Attention Is All You Need.pdf"),
+        "{}",
+        file.path
+    );
+    assert_eq!(std::fs::read(&file.path).unwrap(), b"%PDF-1.5 attention");
+    assert_eq!((file.last_page, file.last_zoom), (None, None));
+    assert!(h.engine.list_items(&ItemQuery::default()).unwrap()[0].has_pdf);
+    assert_eq!(
+        h.engine
+            .list_items(&ItemQuery {
+                scope: Scope::NoPdf,
+                ..ItemQuery::default()
+            })
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(
+        block_on(h.engine.find_pdf(&row.id)).unwrap().id,
+        file.id,
+        "searching again returns the PDF it has"
+    );
+    assert_eq!(
+        h.http
+            .requests()
+            .iter()
+            .filter(|request| request.url == ARXIV_PDF_ATTENTION)
+            .count(),
+        1
+    );
+}
+
+fn checking(item_id: &str, source: &str) -> Event {
+    Event::Step(
+        item_id.to_string(),
+        PdfStep::Checking {
+            source: source.into(),
+        },
+    )
+}
+
+#[test]
+fn closed_papers_report_no_pdf_and_offline_searches_can_be_retried() {
+    let h = harness();
+    h.http.route(
+        OPENALEX_DEEP_LEARNING,
+        200,
+        br#"{"open_access":{"is_oa":false},"best_oa_location":null,"locations":[]}"#.to_vec(),
+    );
+    let row = block_on(h.engine.add_by_identifier("10.1038/nature14539")).unwrap();
+    h.events.take();
+
+    assert_eq!(
+        block_on(h.engine.find_pdf(&row.id)),
+        Err(PaperError::PdfNotFound {
+            item_id: row.id.clone()
+        })
+    );
+    assert_eq!(
+        h.events.take(),
+        [
+            Event::Pdf(row.id.clone(), PdfStatus::Searching),
+            checking(&row.id, "openalex"),
+            Event::Pdf(row.id.clone(), PdfStatus::NotFound)
+        ]
+    );
+
+    h.http.fail_with("offline");
+    assert!(matches!(
+        block_on(h.engine.find_pdf(&row.id)),
+        Err(PaperError::Network { .. })
+    ));
+    assert_eq!(
+        h.events.take().last(),
+        Some(&Event::Pdf(row.id.clone(), PdfStatus::Failed))
+    );
+
+    h.http.recover();
+    h.http.route(
+        OPENALEX_DEEP_LEARNING,
+        200,
+        br#"{"best_oa_location":{"pdf_url":"https://example.org/deep.pdf"},"locations":[]}"#
+            .to_vec(),
+    );
+    h.http.route_responses(
+        "https://example.org/deep.pdf",
+        vec![pdf_response(b"%PDF-1.3")],
+    );
+    let attached = block_on(h.engine.find_pdf(&row.id)).unwrap();
+    assert_eq!(attached.item_id, row.id);
+    assert_eq!(
+        h.events.take(),
+        [
+            Event::Pdf(row.id.clone(), PdfStatus::Searching),
+            checking(&row.id, "openalex"),
+            Event::Step(
+                row.id.clone(),
+                PdfStep::Downloading {
+                    source: "openalex".into(),
+                    received_bytes: 8,
+                    total_bytes: Some(8),
+                }
+            ),
+            Event::Pdf(row.id.clone(), PdfStatus::Found),
+            Event::Items(vec![row.id.clone()]),
+        ]
+    );
+}
+
+#[test]
+fn one_item_has_one_pdf_search_at_a_time() {
+    let h = harness();
+    h.http.route(
+        OPENALEX_DEEP_LEARNING,
+        200,
+        br#"{"best_oa_location":{"pdf_url":"https://example.org/deep.pdf"},"locations":[]}"#
+            .to_vec(),
+    );
+    h.http.route_responses(
+        "https://example.org/deep.pdf",
+        vec![pdf_response(b"%PDF-1.3")],
+    );
+    let row = block_on(h.engine.add_by_identifier("10.1038/nature14539")).unwrap();
+
+    h.http.hold();
+    thread::scope(|scope| {
+        let first = scope.spawn(|| block_on(h.engine.find_pdf(&row.id)));
+        h.http.wait_for_held_request();
+        assert!(matches!(
+            block_on(h.engine.find_pdf(&row.id)),
+            Err(PaperError::Library { .. })
+        ));
+        h.http.release();
+        assert!(first.join().unwrap().is_ok());
+    });
+    assert_eq!(h.engine.item_detail(&row.id).unwrap().attachments.len(), 1);
+}
+
+#[test]
+fn attached_files_are_copied_and_reading_positions_are_kept() {
+    let h = harness();
+    let row = block_on(h.engine.add_by_identifier("10.1038/nature14539")).unwrap();
+    let outside = h._dir.path().join("Downloads");
+    std::fs::create_dir_all(&outside).unwrap();
+    let html = outside.join("page.pdf");
+    std::fs::write(&html, b"<!DOCTYPE html>").unwrap();
+    let pdf = outside.join("lecun.pdf");
+    std::fs::write(&pdf, b"%PDF-1.4 deep").unwrap();
+    h.events.take();
+
+    assert_eq!(
+        block_on(h.engine.attach_file(&row.id, html.to_str().unwrap())),
+        Err(PaperError::NotPdf {
+            path: html.display().to_string()
+        })
+    );
+    let attached = block_on(h.engine.attach_file(&row.id, pdf.to_str().unwrap())).unwrap();
+    assert_eq!(h.events.take(), [Event::Items(vec![row.id.clone()])]);
+    assert!(pdf.exists(), "the original stays where it was");
+    let file = h.engine.attachment_file(&attached.id).unwrap();
+    assert_ne!(file.path, pdf.display().to_string());
+    assert!(
+        file.path
+            .starts_with(&h.engine.library_path().display().to_string())
+    );
+    assert_eq!(std::fs::read(&file.path).unwrap(), b"%PDF-1.4 deep");
+
+    let unread = ItemQuery {
+        scope: Scope::Unread,
+        ..ItemQuery::default()
+    };
+    assert_eq!(h.engine.list_items(&unread).unwrap().len(), 1);
+    h.engine.set_reading_position(&attached.id, 2, 1.5).unwrap();
+    assert_eq!(
+        h.events.take(),
+        [Event::Items(vec![row.id.clone()])],
+        "the first open takes the paper out of Unread"
+    );
+    h.engine.set_reading_position(&attached.id, 3, 1.5).unwrap();
+    assert!(h.events.take().is_empty(), "later page turns are quiet");
+    assert_eq!(h.engine.list_items(&unread).unwrap().len(), 0);
+    let file = h.engine.attachment_file(&attached.id).unwrap();
+    assert_eq!((file.last_page, file.last_zoom), (Some(3), Some(1.5)));
 }

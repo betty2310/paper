@@ -11,9 +11,9 @@ use std::time::SystemTime;
 
 use paper_engine as engine;
 use paper_engine::{
-    AttachmentRow, CollectionNode, Creator, CreatorRole, ItemDetail, ItemFields, ItemKind,
-    ItemQuery, ItemRow, LookupStatus, MetadataPatch, PaperError, Scope, Settings, SortColumn, Tag,
-    WindowState,
+    AttachmentFile, AttachmentRow, CollectionNode, Creator, CreatorRole, ItemDetail, ItemFields,
+    ItemKind, ItemQuery, ItemRow, LookupStatus, MetadataPatch, PaperError, PdfStatus, PdfStep,
+    Scope, Settings, SortColumn, Tag, WindowState,
 };
 
 uniffi::setup_scaffolding!();
@@ -33,6 +33,26 @@ pub enum LookupStatus {
     Pending,
     Done,
     Failed,
+}
+
+#[uniffi::remote(Enum)]
+pub enum PdfStatus {
+    Searching,
+    Found,
+    NotFound,
+    Failed,
+}
+
+#[uniffi::remote(Enum)]
+pub enum PdfStep {
+    Checking {
+        source: String,
+    },
+    Downloading {
+        source: String,
+        received_bytes: u64,
+        total_bytes: Option<u64>,
+    },
 }
 
 #[uniffi::remote(Enum)]
@@ -92,6 +112,12 @@ pub enum PaperError {
         doi: String,
         item_id: String,
         message: String,
+    },
+    PdfNotFound {
+        item_id: String,
+    },
+    NotPdf {
+        path: String,
     },
     Settings {
         message: String,
@@ -179,6 +205,15 @@ pub struct AttachmentRow {
 }
 
 #[uniffi::remote(Record)]
+pub struct AttachmentFile {
+    pub id: String,
+    pub item_id: String,
+    pub path: String,
+    pub last_page: Option<i32>,
+    pub last_zoom: Option<f64>,
+}
+
+#[uniffi::remote(Record)]
 pub struct Tag {
     pub id: String,
     pub name: String,
@@ -243,6 +278,8 @@ pub trait EngineObserver: Send + Sync {
     fn collections_changed(&self);
     fn tags_changed(&self);
     fn lookup_progress(&self, item_id: String, status: LookupStatus);
+    fn pdf_progress(&self, item_id: String, status: PdfStatus);
+    fn pdf_step(&self, item_id: String, step: PdfStep);
 }
 
 /// Passes engine events to the Swift observer.
@@ -263,6 +300,14 @@ impl engine::EngineObserver for ObserverAdapter {
 
     fn lookup_progress(&self, item_id: String, status: LookupStatus) {
         self.0.lookup_progress(item_id, status);
+    }
+
+    fn pdf_progress(&self, item_id: String, status: PdfStatus) {
+        self.0.pdf_progress(item_id, status);
+    }
+
+    fn pdf_step(&self, item_id: String, step: PdfStep) {
+        self.0.pdf_step(item_id, step);
     }
 }
 
@@ -353,6 +398,28 @@ impl Engine {
 
     pub fn can_undo_delete(&self) -> bool {
         self.0.can_undo_delete()
+    }
+
+    // attachments
+
+    pub async fn find_pdf(&self, item_id: String) -> Result<AttachmentRow, PaperError> {
+        self.0.find_pdf(&item_id).await
+    }
+
+    pub async fn attach_file(
+        &self,
+        item_id: String,
+        path: String,
+    ) -> Result<AttachmentRow, PaperError> {
+        self.0.attach_file(&item_id, &path).await
+    }
+
+    pub fn attachment_file(&self, id: String) -> Result<AttachmentFile, PaperError> {
+        self.0.attachment_file(&id)
+    }
+
+    pub fn set_reading_position(&self, id: String, page: i32, zoom: f64) -> Result<(), PaperError> {
+        self.0.set_reading_position(&id, page, zoom)
     }
 
     // collections

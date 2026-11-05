@@ -6,12 +6,13 @@
 //! so the engine can keep it. Everything is blocking and meant to run on an
 //! engine thread; `HttpClient` is a trait so tests never touch the network.
 //!
-//! Open access PDF discovery (OpenAlex, Unpaywall, arXiv, Europe PMC) is
-//! milestone 2 and will be added next to the metadata sources here.
+//! `Resolver::find_pdf` looks for an open access PDF in arXiv, OpenAlex,
+//! Unpaywall, and Europe PMC, and downloads the first real PDF it finds.
 
 mod crossref;
 mod csl;
 mod http;
+mod pdf;
 mod rate_limit;
 mod resolver;
 #[cfg(any(test, feature = "testing"))]
@@ -19,6 +20,7 @@ pub mod testing;
 mod text;
 
 pub use http::{Contact, HttpClient, Response, USER_AGENT_PRODUCT, UreqClient};
+pub use pdf::{FoundPdf, PdfQuery, PdfSearch, is_pdf};
 pub use resolver::{Lookup, Resolver};
 
 /// Errors from the lookup pipeline. The engine maps them onto `PaperError`.
@@ -36,4 +38,7 @@ pub enum FetchError {
     /// No source knows this DOI.
     #[error("no metadata found for {doi}")]
     NotFound { doi: String },
+    /// No source offers an open access PDF for this paper.
+    #[error("no open access PDF found for {doi}")]
+    NoPdf { doi: String },
 }

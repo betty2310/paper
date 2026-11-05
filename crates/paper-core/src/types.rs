@@ -207,6 +207,47 @@ pub struct AttachmentRow {
     pub added_at: SystemTime,
 }
 
+/// Where the search for an item's open access PDF is. Not stored: the app
+/// keeps it per item while it runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PdfStatus {
+    /// Asking the open access sources and downloading.
+    Searching,
+    /// A PDF was downloaded and attached.
+    Found,
+    /// No source offers an open access PDF.
+    NotFound,
+    /// The search could not finish, usually because the network is down.
+    Failed,
+}
+
+/// What a running PDF search is doing, for progress in the app. `source` is
+/// `arxiv`, `openalex`, `unpaywall`, or `europepmc`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PdfStep {
+    /// Asking a source whether it has an open access copy.
+    Checking { source: String },
+    /// Downloading a file a source pointed to. `total_bytes` is known when
+    /// the server sent a length.
+    Downloading {
+        source: String,
+        received_bytes: u64,
+        total_bytes: Option<u64>,
+    },
+}
+
+/// What the reader needs to open an attachment.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AttachmentFile {
+    pub id: String,
+    pub item_id: String,
+    /// Absolute path of the PDF inside the library folder.
+    pub path: String,
+    /// 0 based page the reader was on, if the PDF was opened before.
+    pub last_page: Option<i32>,
+    pub last_zoom: Option<f64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tag {
     pub id: String,

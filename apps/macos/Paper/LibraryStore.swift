@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import PaperEngine
+import UniformTypeIdentifiers
 import os
 
 /// The one object in the app that holds the engine for an open library.
@@ -10,19 +11,6 @@ import os
 /// hopped to the main actor here before anything else sees them.
 @MainActor
 final class LibraryStore: ObservableObject {
-    /// One line of feedback at the bottom of the list, with an optional action.
-    struct Notice: Equatable {
-        enum Kind { case info, error }
-        let kind: Kind
-        let message: String
-        let actionTitle: String?
-        let action: (() -> Void)?
-
-        static func == (lhs: Notice, rhs: Notice) -> Bool {
-            lhs.message == rhs.message && lhs.kind == rhs.kind
-        }
-    }
-
     let engine: Engine
     let libraryPath: String
     let undoManager = UndoManager()
@@ -32,7 +20,14 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var tags: [Tag] = []
     @Published private(set) var smartListCounts: [Scope: Int] = [:]
     @Published private(set) var detail: ItemDetail?
-    @Published private(set) var notice: Notice?
+    /// The floating toasts, oldest first.
+    @Published private(set) var toasts: [Toast] = []
+    /// Where each item's PDF search is, for items searched since launch.
+    @Published private(set) var pdfStatus: [String: PdfStatus] = [:]
+    /// Items whose PDF search just found and attached a file.
+    let pdfFound = PassthroughSubject<String, Never>()
+    /// Opens a paper's PDF in a tab; the window sets it for the toasts' Open button.
+    var openPaper: (String) -> Void = { _ in }
 
     @Published var scope: Scope = .all { didSet { reloadItems() } }
     @Published var searchText = "" { didSet { reloadItems() } }
@@ -40,7 +35,9 @@ final class LibraryStore: ObservableObject {
     @Published var ascending = false { didSet { reloadItems() } }
     @Published var selectedItemIds: [String] = [] { didSet { reloadDetail() } }
 
-    private var noticeTimer: Timer?
+    private var toastTimers: [String: Timer] = [:]
+    /// The pointer is over the toasts, so none of them leaves.
+    private var holdingToasts = false
     private var noteSaveTimer: Timer?
     private var pendingNote: (itemId: String, markdown: String)?
 
@@ -135,15 +132,106 @@ final class LibraryStore: ObservableObject {
 
     private func handle(_ event: ObserverBridge.Event) {
         switch event {
-        case .items, .lookup:
+        case .items:
             reloadItems()
+        case .lookup(let itemId, let status):
+            reloadItems()
+            lookupChanged(itemId: itemId, status: status)
         case .collections:
             reloadCollections()
             reloadItems()
         case .tags:
             reloadTags()
             reloadDetail()
+        case .pdf(let itemId, let status):
+            pdfStatus[itemId] = status
+            pdfChanged(itemId: itemId, status: status)
+            if status == .found { pdfFound.send(itemId) }
+        case .pdfStep(let itemId, let step):
+            pdfStepped(itemId: itemId, step: step)
         }
+    }
+
+    // MARK: Progress toasts
+
+    private func lookupChanged(itemId: String, status: LookupStatus) {
+        let id = Toast.itemId(itemId)
+        switch status {
+        case .pending:
+            show(Toast(id: id, style: .working(progress: nil), message: "Looking up paper",
+                       subject: items.first { $0.id == itemId }?.doi))
+        case .done:
+            // The PDF search that starts next takes the toast over.
+            show(Toast(id: id, style: .done, message: "Added to library", subject: subject(itemId)))
+        case .failed:
+            // The add or retry that ran the lookup reports the error.
+            break
+        }
+    }
+
+    private func pdfChanged(itemId: String, status: PdfStatus) {
+        let id = Toast.itemId(itemId)
+        let subject = subject(itemId)
+        switch status {
+        case .searching:
+            show(Toast(id: id, style: .working(progress: nil), message: "Finding PDF", subject: subject))
+        case .found:
+            show(Toast(id: id, style: .done, message: "PDF downloaded", subject: subject,
+                       action: openAction(itemId)))
+        case .notFound:
+            show(Toast(id: id, style: .warning, message: "No open access PDF", subject: subject,
+                       action: .init(title: "Attach…") { [weak self] in
+                           self?.dismissToast(id: id)
+                           self?.chooseFileToAttach(itemId: itemId)
+                       }))
+        case .failed:
+            show(Toast(id: id, style: .error, message: "PDF download failed", subject: subject,
+                       action: .init(title: "Retry") { [weak self] in self?.findPdf(itemId: itemId) }))
+        }
+    }
+
+    private func pdfStepped(itemId: String, step: PdfStep) {
+        // A step that arrives after the search ended is stale.
+        guard pdfStatus[itemId] == .searching else { return }
+        var toast = Toast(id: Toast.itemId(itemId), style: .working(progress: nil), message: "", subject: subject(itemId))
+        switch step {
+        case .checking(let source):
+            toast.message = "Checking \(Self.sourceName(source))"
+        case .downloading(_, let received, let total):
+            toast.message = "Downloading PDF"
+            if let total, total > 0 {
+                toast.style = .working(progress: min(1, Double(received) / Double(total)))
+                toast.detail = "\(Self.bytes(received)) of \(Self.bytes(total))"
+            } else {
+                toast.detail = Self.bytes(received)
+            }
+        }
+        show(toast)
+    }
+
+    private func openAction(_ itemId: String) -> Toast.Action {
+        .init(title: "Open") { [weak self] in
+            self?.dismissToast(id: Toast.itemId(itemId))
+            self?.openPaper(itemId)
+        }
+    }
+
+    private func subject(_ itemId: String) -> String? {
+        items.first { $0.id == itemId }?.title ?? (try? engine.itemDetail(id: itemId))?.fields.title
+    }
+
+    private static func sourceName(_ source: String) -> String {
+        switch source {
+        case "arxiv": "arXiv"
+        case "openalex": "OpenAlex"
+        case "unpaywall": "Unpaywall"
+        case "europepmc": "Europe PMC"
+        default: source
+        }
+    }
+
+    private static func bytes(_ count: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(clamping: count), countStyle: .file)
     }
 
     // MARK: Adding papers
@@ -172,6 +260,69 @@ final class LibraryStore: ObservableObject {
         }
     }
 
+    // MARK: PDFs
+
+    /// The item's PDF, if it has one.
+    func pdfAttachment(itemId: String) -> AttachmentRow? {
+        (try? engine.itemDetail(id: itemId))?.attachments.first { $0.mime == "application/pdf" }
+    }
+
+    /// Searches the open access sources again. Progress arrives as `pdfStatus`.
+    func findPdf(itemId: String) {
+        Task {
+            do {
+                _ = try await engine.findPdf(itemId: itemId)
+            } catch PaperError.PdfNotFound {
+                // Searches that ran report this themselves; an item with no
+                // identifier to search for fails before it starts.
+                pdfStatus[itemId] = .notFound
+                pdfChanged(itemId: itemId, status: .notFound)
+            } catch {
+                report(error)
+            }
+        }
+    }
+
+    /// Copies a PDF the user picked into the library.
+    func attachFile(itemId: String, url: URL) {
+        Task {
+            do {
+                _ = try await engine.attachFile(itemId: itemId, path: url.path)
+                pdfStatus[itemId] = nil
+                show(Toast(id: Toast.itemId(itemId), style: .done, message: "PDF attached", subject: subject(itemId),
+                           action: openAction(itemId)))
+            } catch {
+                report(error)
+            }
+        }
+    }
+
+    /// Asks for a PDF to attach to the item.
+    func chooseFileToAttach(itemId: String) {
+        let panel = NSOpenPanel()
+        panel.title = "Attach PDF"
+        panel.message = "Choose a PDF. Paper copies it into the library and leaves the original alone."
+        panel.allowedContentTypes = [.pdf]
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Attach"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        attachFile(itemId: itemId, url: url)
+    }
+
+    func attachmentFile(id: String) throws -> AttachmentFile {
+        try engine.attachmentFile(id: id)
+    }
+
+    /// `zoom` 0 means fit width.
+    func setReadingPosition(attachmentId: String, page: Int, zoom: Double) {
+        perform { try engine.setReadingPosition(id: attachmentId, page: Int32(page), zoom: zoom) }
+    }
+
+    func revealAttachment(id: String) {
+        guard let file = try? engine.attachmentFile(id: id) else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)])
+    }
+
     /// Selects the item, switching to All Papers if the current scope hides it.
     func select(_ itemId: String) {
         if !items.contains(where: { $0.id == itemId }) {
@@ -195,12 +346,9 @@ final class LibraryStore: ObservableObject {
                 Task { @MainActor in store.undoDelete() }
             }
             undoManager.setActionName(itemIds.count == 1 ? "Delete Paper" : "Delete \(itemIds.count) Papers")
-            show(Notice(
-                kind: .info,
-                message: itemIds.count == 1 ? "Paper moved to the trash." : "\(itemIds.count) papers moved to the trash.",
-                actionTitle: "Undo",
-                action: { [weak self] in self?.undoManager.undo() }
-            ))
+            show(Toast(id: Self.trashToast, style: .done,
+                       message: itemIds.count == 1 ? "Paper moved to the trash" : "\(itemIds.count) papers moved to the trash",
+                       action: .init(title: "Undo") { [weak self] in self?.undoManager.undo() }))
         }
     }
 
@@ -212,7 +360,7 @@ final class LibraryStore: ObservableObject {
                 Task { @MainActor in store.delete(itemIds: restored) }
             }
             selectedItemIds = restored
-            dismissNotice()
+            dismissToast(id: Self.trashToast)
         }
     }
 
@@ -282,21 +430,45 @@ final class LibraryStore: ObservableObject {
         engine.close()
     }
 
-    // MARK: Notices
+    // MARK: Toasts
 
-    func show(_ notice: Notice) {
-        self.notice = notice
-        noticeTimer?.invalidate()
-        if notice.kind == .info {
-            noticeTimer = Timer.scheduledTimer(withTimeInterval: Theme.Duration.notice, repeats: false) { [weak self] _ in
-                Task { @MainActor in self?.dismissNotice() }
-            }
+    private static let trashToast = "trash"
+    private static let errorToast = "error"
+
+    /// Shows a toast, or updates the one with the same id in place.
+    func show(_ toast: Toast) {
+        if let index = toasts.firstIndex(where: { $0.id == toast.id }) {
+            if toasts[index] != toast { toasts[index] = toast }
+        } else {
+            toasts.append(toast)
+            if toasts.count > Theme.Toast.maxCount { dismissToast(id: toasts[0].id) }
+        }
+        scheduleDismissal(of: toast)
+    }
+
+    func dismissToast(id: String) {
+        toastTimers.removeValue(forKey: id)?.invalidate()
+        toasts.removeAll { $0.id == id }
+    }
+
+    /// Finished toasts wait while the pointer is over them.
+    func holdToasts(_ hold: Bool) {
+        holdingToasts = hold
+        if hold {
+            toastTimers.values.forEach { $0.invalidate() }
+            toastTimers = [:]
+        } else {
+            toasts.forEach(scheduleDismissal(of:))
         }
     }
 
-    func dismissNotice() {
-        noticeTimer?.invalidate()
-        notice = nil
+    private func scheduleDismissal(of toast: Toast) {
+        toastTimers.removeValue(forKey: toast.id)?.invalidate()
+        guard toast.style.lingers, !holdingToasts else { return }
+        let id = toast.id
+        toastTimers[id] = Timer.scheduledTimer(withTimeInterval: Theme.Duration.toast, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.dismissToast(id: id) }
+        }
     }
 
     private func perform(_ work: () throws -> Void) {
@@ -307,26 +479,36 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    /// Turns an engine error into a notice with the right action.
+    /// Turns an engine error into a toast with the right action. Errors about
+    /// one paper replace that paper's progress toast.
     func report(_ error: Error) {
+        func failed(_ message: String, about itemId: String? = nil, action: Toast.Action? = nil) {
+            show(Toast(id: itemId.map(Toast.itemId) ?? Self.errorToast, style: .error, message: message,
+                       subject: itemId.flatMap(subject), action: action))
+        }
         switch error as? PaperError {
         case .Duplicate(let doi, let itemId):
-            show(Notice(kind: .info, message: "\(doi) is already in your library.", actionTitle: "Show",
-                        action: { [weak self] in self?.select(itemId) }))
+            show(Toast(id: Toast.itemId(itemId), style: .warning, message: "Already in your library", subject: subject(itemId) ?? doi,
+                       action: .init(title: "Show") { [weak self] in
+                           self?.dismissToast(id: Toast.itemId(itemId))
+                           self?.select(itemId)
+                       }))
         case .InvalidIdentifier(let text):
-            show(Notice(kind: .error, message: "“\(text)” is not a DOI or arXiv ID.", actionTitle: nil, action: nil))
+            failed("“\(text)” is not a DOI or arXiv ID")
         case .MetadataNotFound(let doi, let itemId):
-            show(Notice(kind: .error, message: "No metadata found for \(doi).", actionTitle: "Retry",
-                        action: { [weak self] in self?.retryLookup(itemId: itemId) }))
+            show(Toast(id: Toast.itemId(itemId), style: .error, message: "No metadata found", subject: doi,
+                       action: .init(title: "Retry") { [weak self] in self?.retryLookup(itemId: itemId) }))
         case .Lookup(let doi, let itemId, let message):
-            show(Notice(kind: .error, message: "Could not look up \(doi): \(message)", actionTitle: "Retry",
-                        action: { [weak self] in self?.retryLookup(itemId: itemId) }))
+            show(Toast(id: Toast.itemId(itemId), style: .error, message: "Lookup failed", detail: message, subject: doi,
+                       action: .init(title: "Retry") { [weak self] in self?.retryLookup(itemId: itemId) }))
         case .Network(let message):
-            show(Notice(kind: .error, message: "Network error: \(message)", actionTitle: nil, action: nil))
+            failed("Network error: \(message)")
+        case .NotPdf:
+            failed("That file is not a PDF")
         case .some(let other):
-            show(Notice(kind: .error, message: Self.describe(other), actionTitle: nil, action: nil))
+            failed(Self.describe(other))
         case nil:
-            show(Notice(kind: .error, message: error.localizedDescription, actionTitle: nil, action: nil))
+            failed(error.localizedDescription)
         }
     }
 
@@ -339,6 +521,8 @@ final class LibraryStore: ObservableObject {
              .Network(let message), .Settings(let message): message
         case .MetadataNotFound(let doi, _): "No metadata found for \(doi)"
         case .Lookup(let doi, _, let message): "Could not look up \(doi): \(message)"
+        case .PdfNotFound: "No open access PDF found."
+        case .NotPdf(let path): "Not a PDF: \(URL(fileURLWithPath: path).lastPathComponent)"
         case .Closed: "The library is closed."
         }
     }
@@ -352,6 +536,8 @@ final class ObserverBridge: EngineObserver, Sendable {
         case collections
         case tags
         case lookup(String, LookupStatus)
+        case pdf(String, PdfStatus)
+        case pdfStep(String, PdfStep)
     }
 
     private let forward: @Sendable (Event) -> Void
@@ -364,6 +550,8 @@ final class ObserverBridge: EngineObserver, Sendable {
     func collectionsChanged() { forward(.collections) }
     func tagsChanged() { forward(.tags) }
     func lookupProgress(itemId: String, status: LookupStatus) { forward(.lookup(itemId, status)) }
+    func pdfProgress(itemId: String, status: PdfStatus) { forward(.pdf(itemId, status)) }
+    func pdfStep(itemId: String, step: PdfStep) { forward(.pdfStep(itemId, step)) }
 }
 
 extension ItemRow {

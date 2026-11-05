@@ -1,6 +1,7 @@
 //! The blocking HTTP client behind every lookup, and the polite identification
 //! each metadata API asks for.
 
+use std::io::Read;
 use std::time::Duration;
 
 use crate::FetchError;
@@ -13,6 +14,10 @@ pub const USER_AGENT_PRODUCT: &str = concat!(
 );
 
 const TIMEOUT: Duration = Duration::from_secs(20);
+/// Downloads are read in chunks of this size, so progress moves smoothly.
+const CHUNK: usize = 64 * 1024;
+/// The largest body read before giving up.
+const MAX_BODY: u64 = 64 * 1024 * 1024;
 
 /// Who is asking. Crossref serves requests that carry an email from its faster
 /// polite pool, and Unpaywall requires one.
@@ -66,6 +71,21 @@ impl Response {
 pub trait HttpClient: Send + Sync {
     /// Performs a GET with the given extra headers, following redirects.
     fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Response, FetchError>;
+
+    /// Like `get`, calling `progress(received, total)` as the body arrives.
+    /// `total` is the `Content-Length`, when the server sent one. Clients that
+    /// cannot stream report the whole body once.
+    fn download(
+        &self,
+        url: &str,
+        headers: &[(&str, &str)],
+        progress: &mut dyn FnMut(u64, Option<u64>),
+    ) -> Result<Response, FetchError> {
+        let response = self.get(url, headers)?;
+        let length = response.body.len() as u64;
+        progress(length, Some(length));
+        Ok(response)
+    }
 }
 
 /// The real client: `ureq` with rustls and the platform's certificate store,
@@ -100,13 +120,23 @@ impl Default for UreqClient {
 
 impl HttpClient for UreqClient {
     fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Response, FetchError> {
+        self.download(url, headers, &mut |_, _| {})
+    }
+
+    fn download(
+        &self,
+        url: &str,
+        headers: &[(&str, &str)],
+        progress: &mut dyn FnMut(u64, Option<u64>),
+    ) -> Result<Response, FetchError> {
+        let network = |error: &dyn std::fmt::Display| FetchError::Network {
+            message: error.to_string(),
+        };
         let mut request = self.agent.get(url);
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
-        let mut response = request.call().map_err(|error| FetchError::Network {
-            message: error.to_string(),
-        })?;
+        let mut response = request.call().map_err(|error| network(&error))?;
         let status = response.status().as_u16();
         let header = |name: &str| {
             response
@@ -117,14 +147,21 @@ impl HttpClient for UreqClient {
         };
         let content_type = header("content-type");
         let retry_after = header("retry-after").and_then(|value| value.trim().parse().ok());
-        let body = response
-            .body_mut()
-            .with_config()
-            .limit(64 * 1024 * 1024)
-            .read_to_vec()
-            .map_err(|error| FetchError::Network {
-                message: error.to_string(),
-            })?;
+        // A compressed body's length says nothing about the bytes read here.
+        let total = header("content-length")
+            .filter(|_| header("content-encoding").is_none_or(|encoding| encoding == "identity"))
+            .and_then(|value| value.trim().parse().ok());
+        let mut reader = response.body_mut().with_config().limit(MAX_BODY).reader();
+        let mut body = Vec::with_capacity(total.unwrap_or(0).min(MAX_BODY) as usize);
+        let mut chunk = vec![0; CHUNK];
+        loop {
+            let read = reader.read(&mut chunk).map_err(|error| network(&error))?;
+            if read == 0 {
+                break;
+            }
+            body.extend_from_slice(&chunk[..read]);
+            progress(body.len() as u64, total);
+        }
         Ok(Response {
             status,
             body,

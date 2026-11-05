@@ -36,6 +36,12 @@ pub enum PaperError {
         item_id: String,
         message: String,
     },
+    /// No source offers an open access PDF for the item.
+    #[error("no open access PDF found")]
+    PdfNotFound { item_id: String },
+    /// The file is not a PDF.
+    #[error("not a PDF: {path}")]
+    NotPdf { path: String },
     #[error("settings error: {message}")]
     Settings { message: String },
     /// The engine was closed; open the library again.

@@ -1,0 +1,76 @@
+{
+  "id": "https://openalex.org/W2951545764",
+  "doi": "https://doi.org/10.1371/journal.pcbi.1005619",
+  "title": "Ten simple rules for structuring papers",
+  "ids": {
+    "openalex": "https://openalex.org/W2951545764",
+    "doi": "https://doi.org/10.1371/journal.pcbi.1005619",
+    "mag": "2951545764",
+    "pmid": "https://pubmed.ncbi.nlm.nih.gov/28957311",
+    "pmcid": "https://www.ncbi.nlm.nih.gov/pmc/articles/5619685"
+  },
+  "open_access": {
+    "is_oa": true,
+    "oa_status": "gold",
+    "oa_url": "https://journals.plos.org/ploscompbiol/article/file?id=10.1371/journal.pcbi.1005619&type=printable",
+    "any_repository_has_fulltext": true
+  },
+  "best_oa_location": {
+    "is_oa": true,
+    "pdf_url": "https://journals.plos.org/ploscompbiol/article/file?id=10.1371/journal.pcbi.1005619&type=printable",
+    "landing_page_url": "https://doi.org/10.1371/journal.pcbi.1005619",
+    "version": "publishedVersion",
+    "license": "cc-by"
+  },
+  "locations": [
+    {
+      "is_oa": true,
+      "pdf_url": "https://journals.plos.org/ploscompbiol/article/file?id=10.1371/journal.pcbi.1005619&type=printable",
+      "landing_page_url": "https://doi.org/10.1371/journal.pcbi.1005619",
+      "version": "publishedVersion",
+      "license": "cc-by"
+    },
+    {
+      "is_oa": true,
+      "pdf_url": "https://www.biorxiv.org/content/biorxiv/early/2017/05/23/088278.full.pdf",
+      "landing_page_url": "https://doi.org/10.1101/088278",
+      "version": "acceptedVersion",
+      "license": "cc-by-nc"
+    },
+    {
+      "is_oa": true,
+      "pdf_url": null,
+      "landing_page_url": "https://www.ncbi.nlm.nih.gov/pmc/articles/5619685",
+      "version": "publishedVersion",
+      "license": "cc-by"
+    },
+    {
+      "is_oa": true,
+      "pdf_url": null,
+      "landing_page_url": "https://www.ncbi.nlm.nih.gov/pmc/articles/5619685",
+      "version": "publishedVersion",
+      "license": "cc-by"
+    },
+    {
+      "is_oa": false,
+      "pdf_url": null,
+      "landing_page_url": "https://pubmed.ncbi.nlm.nih.gov/28957311",
+      "version": "publishedVersion",
+      "license": null
+    },
+    {
+      "is_oa": false,
+      "pdf_url": null,
+      "landing_page_url": "https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1005619",
+      "version": "submittedVersion",
+      "license": null
+    },
+    {
+      "is_oa": true,
+      "pdf_url": null,
+      "landing_page_url": "https://doaj.org/article/13df1dc0e3904c1892c944425969f298",
+      "version": "submittedVersion",
+      "license": "cc-by-sa"
+    }
+  ]
+}

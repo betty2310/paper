@@ -487,6 +487,22 @@ fileprivate struct FfiConverterInt32: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
+    typealias FfiType = UInt64
+    typealias SwiftType = UInt64
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt64 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterInt64: FfiConverterPrimitive {
     typealias FfiType = Int64
     typealias SwiftType = Int64
@@ -638,6 +654,10 @@ public protocol EngineProtocol: AnyObject, Sendable {
     
     func addToCollection(collectionId: String, itemIds: [String]) throws 
     
+    func attachFile(itemId: String, path: String) async throws  -> AttachmentRow
+    
+    func attachmentFile(id: String) throws  -> AttachmentFile
+    
     func canUndoDelete()  -> Bool
     
     func close() 
@@ -649,6 +669,8 @@ public protocol EngineProtocol: AnyObject, Sendable {
     func deleteCollection(id: String) throws 
     
     func deleteItems(ids: [String]) throws 
+    
+    func findPdf(itemId: String) async throws  -> AttachmentRow
     
     func itemDetail(id: String) throws  -> ItemDetail
     
@@ -671,6 +693,8 @@ public protocol EngineProtocol: AnyObject, Sendable {
     func saveNote(itemId: String, markdown: String) throws 
     
     func setObserver(observer: EngineObserver) 
+    
+    func setReadingPosition(id: String, page: Int32, zoom: Double) throws 
     
     func setTagColor(tagId: String, color: String?) throws 
     
@@ -784,6 +808,32 @@ open func addToCollection(collectionId: String, itemIds: [String])throws   {try 
 }
 }
     
+open func attachFile(itemId: String, path: String)async throws  -> AttachmentRow  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_paper_ffi_fn_method_engine_attach_file(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(itemId),FfiConverterString.lower(path)
+                )
+            },
+            pollFunc: ffi_paper_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_paper_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_paper_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeAttachmentRow_lift,
+            errorHandler: FfiConverterTypePaperError_lift
+        )
+}
+    
+open func attachmentFile(id: String)throws  -> AttachmentFile  {
+    return try  FfiConverterTypeAttachmentFile_lift(try rustCallWithError(FfiConverterTypePaperError_lift) {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engine_attachment_file(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),uniffiCallStatus
+    )
+})
+}
+    
 open func canUndoDelete() -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
         uniffiCallStatus in
@@ -837,6 +887,22 @@ open func deleteItems(ids: [String])throws   {try rustCallWithError(FfiConverter
         FfiConverterSequenceString.lower(ids),uniffiCallStatus
     )
 }
+}
+    
+open func findPdf(itemId: String)async throws  -> AttachmentRow  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_paper_ffi_fn_method_engine_find_pdf(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(itemId)
+                )
+            },
+            pollFunc: ffi_paper_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_paper_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_paper_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeAttachmentRow_lift,
+            errorHandler: FfiConverterTypePaperError_lift
+        )
 }
     
 open func itemDetail(id: String)throws  -> ItemDetail  {
@@ -949,6 +1015,17 @@ open func setObserver(observer: EngineObserver)  {try! rustCall() {
     uniffi_paper_ffi_fn_method_engine_set_observer(
             self.uniffiCloneHandle(),
         FfiConverterTypeEngineObserver_lower(observer),uniffiCallStatus
+    )
+}
+}
+    
+open func setReadingPosition(id: String, page: Int32, zoom: Double)throws   {try rustCallWithError(FfiConverterTypePaperError_lift) {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engine_set_reading_position(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterInt32.lower(page),
+        FfiConverterDouble.lower(zoom),uniffiCallStatus
     )
 }
 }
@@ -1082,6 +1159,10 @@ public protocol EngineObserver: AnyObject, Sendable {
     
     func lookupProgress(itemId: String, status: LookupStatus) 
     
+    func pdfProgress(itemId: String, status: PdfStatus) 
+    
+    func pdfStep(itemId: String, step: PdfStep) 
+    
 }
 /**
  * Implemented in Swift. Called on engine threads.
@@ -1170,6 +1251,26 @@ open func lookupProgress(itemId: String, status: LookupStatus)  {try! rustCall()
             self.uniffiCloneHandle(),
         FfiConverterString.lower(itemId),
         FfiConverterTypeLookupStatus_lower(status),uniffiCallStatus
+    )
+}
+}
+    
+open func pdfProgress(itemId: String, status: PdfStatus)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engineobserver_pdf_progress(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(itemId),
+        FfiConverterTypePdfStatus_lower(status),uniffiCallStatus
+    )
+}
+}
+    
+open func pdfStep(itemId: String, step: PdfStep)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engineobserver_pdf_step(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(itemId),
+        FfiConverterTypePdfStep_lower(step),uniffiCallStatus
     )
 }
 }
@@ -1295,6 +1396,58 @@ fileprivate struct UniffiCallbackInterfaceEngineObserver {
                 makeCall: makeCall,
                 writeReturn: writeReturn
             )
+        },
+        pdfProgress: { (
+            uniffiHandle: UInt64,
+            itemId: RustBuffer,
+            status: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterTypeEngineObserver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.pdfProgress(
+                     itemId: try FfiConverterString.lift(itemId),
+                     status: try FfiConverterTypePdfStatus_lift(status)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        pdfStep: { (
+            uniffiHandle: UInt64,
+            itemId: RustBuffer,
+            step: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterTypeEngineObserver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.pdfStep(
+                     itemId: try FfiConverterString.lift(itemId),
+                     step: try FfiConverterTypePdfStep_lift(step)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
         }
     )
 
@@ -1371,6 +1524,72 @@ public func FfiConverterTypeEngineObserver_lower(_ value: EngineObserver) -> UIn
 }
 
 
+
+
+public struct AttachmentFile: Equatable, Hashable {
+    public var id: String
+    public var itemId: String
+    public var path: String
+    public var lastPage: Int32?
+    public var lastZoom: Double?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, itemId: String, path: String, lastPage: Int32?, lastZoom: Double?) {
+        self.id = id
+        self.itemId = itemId
+        self.path = path
+        self.lastPage = lastPage
+        self.lastZoom = lastZoom
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension AttachmentFile: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAttachmentFile: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AttachmentFile {
+        return
+            try AttachmentFile(
+                id: FfiConverterString.read(from: &buf), 
+                itemId: FfiConverterString.read(from: &buf), 
+                path: FfiConverterString.read(from: &buf), 
+                lastPage: FfiConverterOptionInt32.read(from: &buf), 
+                lastZoom: FfiConverterOptionDouble.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: AttachmentFile, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.itemId, into: &buf)
+        FfiConverterString.write(value.path, into: &buf)
+        FfiConverterOptionInt32.write(value.lastPage, into: &buf)
+        FfiConverterOptionDouble.write(value.lastZoom, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAttachmentFile_lift(_ buf: RustBuffer) throws -> AttachmentFile {
+    return try FfiConverterTypeAttachmentFile.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAttachmentFile_lower(_ value: AttachmentFile) -> RustBuffer {
+    return FfiConverterTypeAttachmentFile.lower(value)
+}
 
 
 public struct AttachmentRow: Equatable, Hashable {
@@ -2477,6 +2696,10 @@ enum PaperError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
     )
     case Lookup(doi: String, itemId: String, message: String
     )
+    case PdfNotFound(itemId: String
+    )
+    case NotPdf(path: String
+    )
     case Settings(message: String
     )
     case Closed
@@ -2540,10 +2763,16 @@ public struct FfiConverterTypePaperError: FfiConverterRustBuffer {
             itemId: try FfiConverterString.read(from: &buf), 
             message: try FfiConverterString.read(from: &buf)
             )
-        case 10: return .Settings(
+        case 10: return .PdfNotFound(
+            itemId: try FfiConverterString.read(from: &buf)
+            )
+        case 11: return .NotPdf(
+            path: try FfiConverterString.read(from: &buf)
+            )
+        case 12: return .Settings(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 11: return .Closed
+        case 13: return .Closed
 
          default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -2605,13 +2834,23 @@ public struct FfiConverterTypePaperError: FfiConverterRustBuffer {
             FfiConverterString.write(message, into: &buf)
             
         
-        case let .Settings(message):
+        case let .PdfNotFound(itemId):
             writeInt(&buf, Int32(10))
+            FfiConverterString.write(itemId, into: &buf)
+            
+        
+        case let .NotPdf(path):
+            writeInt(&buf, Int32(11))
+            FfiConverterString.write(path, into: &buf)
+            
+        
+        case let .Settings(message):
+            writeInt(&buf, Int32(12))
             FfiConverterString.write(message, into: &buf)
             
         
         case .Closed:
-            writeInt(&buf, Int32(11))
+            writeInt(&buf, Int32(13))
         
         }
     }
@@ -2631,6 +2870,160 @@ public func FfiConverterTypePaperError_lift(_ buf: RustBuffer) throws -> PaperEr
 public func FfiConverterTypePaperError_lower(_ value: PaperError) -> RustBuffer {
     return FfiConverterTypePaperError.lower(value)
 }
+
+
+
+public enum PdfStatus: Equatable, Hashable {
+    
+    case searching
+    case found
+    case notFound
+    case failed
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension PdfStatus: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePdfStatus: FfiConverterRustBuffer {
+    typealias SwiftType = PdfStatus
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PdfStatus {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .searching
+        
+        case 2: return .found
+        
+        case 3: return .notFound
+        
+        case 4: return .failed
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PdfStatus, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .searching:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .found:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .notFound:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .failed:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePdfStatus_lift(_ buf: RustBuffer) throws -> PdfStatus {
+    return try FfiConverterTypePdfStatus.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePdfStatus_lower(_ value: PdfStatus) -> RustBuffer {
+    return FfiConverterTypePdfStatus.lower(value)
+}
+
+
+
+
+public enum PdfStep: Equatable, Hashable {
+    
+    case checking(source: String
+    )
+    case downloading(source: String, receivedBytes: UInt64, totalBytes: UInt64?
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension PdfStep: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePdfStep: FfiConverterRustBuffer {
+    typealias SwiftType = PdfStep
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PdfStep {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .checking(source: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .downloading(source: try FfiConverterString.read(from: &buf), receivedBytes: try FfiConverterUInt64.read(from: &buf), totalBytes: try FfiConverterOptionUInt64.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PdfStep, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .checking(source):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(source, into: &buf)
+            
+        
+        case let .downloading(source,receivedBytes,totalBytes):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(source, into: &buf)
+            FfiConverterUInt64.write(receivedBytes, into: &buf)
+            FfiConverterOptionUInt64.write(totalBytes, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePdfStep_lift(_ buf: RustBuffer) throws -> PdfStep {
+    return try FfiConverterTypePdfStep.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePdfStep_lower(_ value: PdfStep) -> RustBuffer {
+    return FfiConverterTypePdfStep.lower(value)
+}
+
 
 
 
@@ -2838,6 +3231,30 @@ fileprivate struct FfiConverterOptionInt32: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterInt32.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
+    typealias SwiftType = UInt64?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt64.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt64.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -3260,6 +3677,12 @@ private let initializationResult: InitializationResult = {
     if (uniffi_paper_ffi_checksum_method_engine_add_to_collection() != 52019) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_paper_ffi_checksum_method_engine_attach_file() != 430) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paper_ffi_checksum_method_engine_attachment_file() != 59480) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_paper_ffi_checksum_method_engine_can_undo_delete() != 40194) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3276,6 +3699,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_delete_items() != 26526) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paper_ffi_checksum_method_engine_find_pdf() != 62843) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_item_detail() != 55787) {
@@ -3311,6 +3737,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_paper_ffi_checksum_method_engine_set_observer() != 53040) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_paper_ffi_checksum_method_engine_set_reading_position() != 20486) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_paper_ffi_checksum_method_engine_set_tag_color() != 23089) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3342,6 +3771,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engineobserver_lookup_progress() != 44599) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paper_ffi_checksum_method_engineobserver_pdf_progress() != 61904) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paper_ffi_checksum_method_engineobserver_pdf_step() != 60869) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_constructor_engine_create_library() != 7097) {

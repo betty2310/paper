@@ -395,23 +395,10 @@ impl Library {
             .collect::<rusqlite::Result<_>>()?;
 
         let attachments = conn
-            .prepare_cached(
-                "SELECT id, item_id, relative_path, mime, byte_size, page_count, last_page, last_zoom, created_at
-                 FROM attachments WHERE item_id = ?1 AND deleted_at IS NULL ORDER BY created_at",
-            )?
-            .query_map(params![id], |row| {
-                Ok(AttachmentRow {
-                    id: row.get("id")?,
-                    item_id: row.get("item_id")?,
-                    relative_path: row.get("relative_path")?,
-                    mime: row.get("mime")?,
-                    byte_size: row.get("byte_size")?,
-                    page_count: row.get("page_count")?,
-                    last_page: row.get("last_page")?,
-                    last_zoom: row.get("last_zoom")?,
-                    added_at: time::parse(&row.get::<_, String>("created_at")?),
-                })
-            })?
+            .prepare_cached(&format!(
+                "{ATTACHMENT_SELECT} WHERE item_id = ?1 AND deleted_at IS NULL ORDER BY created_at"
+            ))?
+            .query_map(params![id], read_attachment)?
             .collect::<rusqlite::Result<_>>()?;
 
         let note = read_note(&conn, id)?;
@@ -867,6 +854,88 @@ impl Library {
     }
 }
 
+impl Library {
+    // ----- attachments -----
+
+    /// Copies a PDF into `files/<item id>/<title>.pdf` and attaches it to the
+    /// item. The bytes go to a temporary name first and are renamed into
+    /// place, so a crash never leaves half a PDF in the library. An existing
+    /// file of the same name is never overwritten.
+    pub fn add_pdf(
+        &self,
+        item_id: &str,
+        bytes: &[u8],
+        source_url: Option<&str>,
+    ) -> Result<AttachmentRow> {
+        let title: String = {
+            let conn = self.conn.lock().unwrap();
+            require_live_item(&conn, item_id)?;
+            conn.query_row(
+                "SELECT title FROM items WHERE id = ?1",
+                params![item_id],
+                |row| row.get(0),
+            )?
+        };
+        let folder = self.files_dir().join(item_id);
+        std::fs::create_dir_all(&folder)?;
+        let stem = file_stem(&title);
+        let mut name = format!("{stem}.pdf");
+        let mut copy = 1;
+        while folder.join(&name).exists() {
+            copy += 1;
+            name = format!("{stem} {copy}.pdf");
+        }
+        let partial = folder.join(format!(".{name}.part"));
+        std::fs::write(&partial, bytes)?;
+        std::fs::rename(&partial, folder.join(&name))?;
+
+        let id = new_id();
+        let now = time::now();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO attachments (id, item_id, relative_path, mime, sha256, byte_size, source_url,
+                created_at, modified_at)
+             VALUES (?1, ?2, ?3, 'application/pdf', ?4, ?5, ?6, ?7, ?7)",
+            params![
+                id,
+                item_id,
+                format!("{item_id}/{name}"),
+                sha256_hex(bytes),
+                bytes.len() as i64,
+                source_url,
+                now
+            ],
+        )?;
+        conn.execute(
+            "UPDATE items SET modified_at = ?2 WHERE id = ?1",
+            params![item_id, now],
+        )?;
+        read_live_attachment(&conn, &id)
+    }
+
+    pub fn attachment(&self, id: &str) -> Result<AttachmentRow> {
+        let conn = self.conn.lock().unwrap();
+        read_live_attachment(&conn, id)
+    }
+
+    /// The absolute path of an attachment's file.
+    pub fn attachment_path(&self, attachment: &AttachmentRow) -> PathBuf {
+        self.files_dir().join(&attachment.relative_path)
+    }
+
+    /// Remembers where the reader left a PDF. Opening a PDF once takes its
+    /// item out of the Unread list.
+    pub fn set_reading_position(&self, id: &str, page: i32, zoom: f64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let changed = conn.execute(
+            "UPDATE attachments SET last_page = ?2, last_zoom = ?3, modified_at = ?4
+             WHERE id = ?1 AND deleted_at IS NULL",
+            params![id, page, zoom, time::now()],
+        )?;
+        not_found_if_zero(changed, id)
+    }
+}
+
 /// Result of `find_item_by_doi`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DoiMatch {
@@ -879,6 +948,69 @@ pub struct DoiMatch {
 /// True when the item has a live PDF attachment.
 const HAS_PDF: &str = "EXISTS (SELECT 1 FROM attachments a WHERE a.item_id = i.id
                                AND a.deleted_at IS NULL AND a.mime = 'application/pdf')";
+
+const ATTACHMENT_SELECT: &str = "
+    SELECT id, item_id, relative_path, mime, byte_size, page_count, last_page, last_zoom, created_at
+    FROM attachments";
+
+fn read_attachment(row: &Row<'_>) -> rusqlite::Result<AttachmentRow> {
+    Ok(AttachmentRow {
+        id: row.get("id")?,
+        item_id: row.get("item_id")?,
+        relative_path: row.get("relative_path")?,
+        mime: row.get("mime")?,
+        byte_size: row.get("byte_size")?,
+        page_count: row.get("page_count")?,
+        last_page: row.get("last_page")?,
+        last_zoom: row.get("last_zoom")?,
+        added_at: time::parse(&row.get::<_, String>("created_at")?),
+    })
+}
+
+fn read_live_attachment(conn: &Connection, id: &str) -> Result<AttachmentRow> {
+    conn.query_row(
+        &format!("{ATTACHMENT_SELECT} WHERE id = ?1 AND deleted_at IS NULL"),
+        params![id],
+        read_attachment,
+    )
+    .optional()?
+    .ok_or_else(|| PaperError::NotFound { id: id.to_string() })
+}
+
+/// A file name from a paper title: no path separators or characters that
+/// Windows and macOS reject, no leading dot, at most 120 characters.
+fn file_stem(title: &str) -> String {
+    let cleaned: String = title
+        .chars()
+        .map(|c| {
+            if c.is_control() || "/\\:*?\"<>|".contains(c) {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    let short: String = collapsed
+        .trim_matches(|c| c == '.' || c == ' ')
+        .chars()
+        .take(120)
+        .collect();
+    let short = short.trim_end_matches(['.', ' ']);
+    if short.is_empty() {
+        "Paper".to_string()
+    } else {
+        short.to_string()
+    }
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
 
 /// The columns of `ItemRow`, plus `first_author` for sorting.
 const ITEM_ROW_SELECT: &str = "
@@ -1802,6 +1934,92 @@ mod tests {
             library.save_note("missing", "x"),
             Err(PaperError::NotFound { .. })
         ));
+    }
+
+    #[test]
+    fn pdfs_are_copied_into_the_item_folder_and_leave_no_pdf_and_unread() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = Library::create(dir.path().join("Library")).unwrap();
+        let id = library
+            .insert_item(
+                &paper("A/B testing: why? <part 1>.", None, &[], None),
+                LookupStatus::Done,
+            )
+            .unwrap();
+        let scope = |scope: Scope| {
+            titles(
+                &library,
+                &ItemQuery {
+                    scope,
+                    ..ItemQuery::default()
+                },
+            )
+            .len()
+        };
+
+        let first = library
+            .add_pdf(&id, b"%PDF-1.7 one", Some("https://arxiv.org/pdf/1"))
+            .unwrap();
+        let second = library.add_pdf(&id, b"%PDF-1.7 two", None).unwrap();
+
+        assert_eq!(
+            first.relative_path,
+            format!("{id}/A B testing why part 1.pdf"),
+            "separators and characters macOS or Windows reject are gone"
+        );
+        assert_eq!(
+            second.relative_path,
+            format!("{id}/A B testing why part 1 2.pdf"),
+            "a second file never overwrites the first"
+        );
+        let path = library.attachment_path(&first);
+        assert!(path.starts_with(dir.path().join("Library").join("files")));
+        assert_eq!(std::fs::read(&path).unwrap(), b"%PDF-1.7 one");
+        assert_eq!(first.byte_size, 12);
+        assert_eq!(first.mime, "application/pdf");
+        let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| name.to_string_lossy().ends_with(".part"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+        let sha: String = library
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT sha256 FROM attachments WHERE id = ?1",
+                params![first.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        // printf '%PDF-1.7 one' | sha256sum
+        assert_eq!(
+            sha,
+            "e6d49ab2abf82176003da667a50ba1d708796b091f2957400c19699badfb6a20"
+        );
+        assert!(library.item_row(&id).unwrap().has_pdf);
+        assert_eq!(scope(Scope::NoPdf), 0);
+        assert_eq!(scope(Scope::Unread), 1, "attached but never opened");
+        assert_eq!(library.item(&id).unwrap().attachments.len(), 2);
+
+        library.set_reading_position(&first.id, 4, 1.25).unwrap();
+        let read = library.attachment(&first.id).unwrap();
+        assert_eq!((read.last_page, read.last_zoom), (Some(4), Some(1.25)));
+        assert_eq!(scope(Scope::Unread), 0);
+        assert_eq!(
+            library.set_reading_position("nope", 0, 1.0),
+            Err(PaperError::NotFound { id: "nope".into() })
+        );
+
+        library.delete_items(std::slice::from_ref(&id)).unwrap();
+        assert_eq!(
+            library.add_pdf(&id, b"%PDF", None),
+            Err(PaperError::NotFound { id: id.clone() }),
+            "a deleted item takes no files"
+        );
+        assert_eq!(file_stem("..."), "Paper");
+        assert_eq!(file_stem(&"x".repeat(300)).len(), 120);
     }
 
     #[test]

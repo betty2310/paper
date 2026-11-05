@@ -92,11 +92,21 @@ impl Resolver {
     }
 
     /// A rate limited GET that retries on 429 and 5xx, honoring `Retry-After`.
-    fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Response, FetchError> {
+    pub(crate) fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Response, FetchError> {
+        self.download(url, headers, &mut |_, _| {})
+    }
+
+    /// `get`, reporting the body's progress as `HttpClient::download` does.
+    pub(crate) fn download(
+        &self,
+        url: &str,
+        headers: &[(&str, &str)],
+        progress: &mut dyn FnMut(u64, Option<u64>),
+    ) -> Result<Response, FetchError> {
         let mut attempt = 1;
         loop {
             self.limiter.wait_for(url);
-            let response = self.client.get(url, headers)?;
+            let response = self.client.download(url, headers, progress)?;
             let should_retry = response.status == 429 || response.status >= 500;
             if !should_retry || attempt >= ATTEMPTS {
                 return Ok(response);
@@ -113,7 +123,7 @@ impl Resolver {
     }
 }
 
-fn record(source: &str, json: &Value) -> SourceRecord {
+pub(crate) fn record(source: &str, json: &Value) -> SourceRecord {
     SourceRecord {
         source: source.to_string(),
         json: json.to_string(),
