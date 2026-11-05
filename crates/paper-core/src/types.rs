@@ -354,6 +354,110 @@ pub struct CollectionNode {
     pub item_count: i64,
 }
 
+/// What an annotation is. Closed set, stored as text. The schema has room for
+/// underline, strikeout, rectangle, and ink; they join this enum when the
+/// reader can make them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AnnotationKind {
+    /// Marked text, drawn over `quads`.
+    Highlight,
+    /// A sticky note anchored at `rect`, with its text in `comment`.
+    Note,
+}
+
+impl AnnotationKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AnnotationKind::Highlight => "highlight",
+            AnnotationKind::Note => "note",
+        }
+    }
+
+    pub fn from_db(text: &str) -> Option<AnnotationKind> {
+        match text {
+            "highlight" => Some(AnnotationKind::Highlight),
+            "note" => Some(AnnotationKind::Note),
+            _ => None,
+        }
+    }
+}
+
+/// A point in PDF user space: points from the bottom left of the unrotated
+/// page, the same space PDFKit's page coordinates use.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct PagePoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+/// One line of marked text as four corners in PDF user space, in the order
+/// of the PDF `QuadPoints` array.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Quad {
+    pub top_left: PagePoint,
+    pub top_right: PagePoint,
+    pub bottom_left: PagePoint,
+    pub bottom_right: PagePoint,
+}
+
+/// A rectangle in PDF user space. `x0, y0` is the bottom left corner.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct PageRect {
+    pub x0: f64,
+    pub y0: f64,
+    pub x1: f64,
+    pub y1: f64,
+}
+
+/// A highlight or note on one page of a PDF attachment. The PDF file is never
+/// changed; annotations live only in the library.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Annotation {
+    pub id: String,
+    pub attachment_id: String,
+    pub kind: AnnotationKind,
+    /// 0 based.
+    pub page_index: i32,
+    /// The marked lines of a highlight; empty for a note.
+    pub quads: Vec<Quad>,
+    /// The union of the quads, or the note's anchor.
+    pub rect: PageRect,
+    /// `#RRGGBB`.
+    pub color: String,
+    /// The text under the quads.
+    pub selected_text: Option<String>,
+    pub comment: Option<String>,
+    pub created_at: SystemTime,
+    pub modified_at: SystemTime,
+}
+
+/// What `create_annotation` needs. A highlight needs `quads` and gets the
+/// union of them as its `rect`; a note needs `rect` and has no quads.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewAnnotation {
+    pub attachment_id: String,
+    pub kind: AnnotationKind,
+    pub page_index: i32,
+    pub quads: Vec<Quad>,
+    pub rect: Option<PageRect>,
+    /// `#RRGGBB`.
+    pub color: String,
+    pub selected_text: Option<String>,
+    pub comment: Option<String>,
+    /// Up to 32 characters before and after the selection on the page, for
+    /// re-anchoring if the PDF is ever replaced.
+    pub text_before: Option<String>,
+    pub text_after: Option<String>,
+}
+
+/// Fields of an annotation the user can change. `None` leaves a field alone;
+/// `Some("")` clears the comment.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AnnotationPatch {
+    pub color: Option<String>,
+    pub comment: Option<String>,
+}
+
 /// A raw API response kept for re-mapping later.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceRecord {

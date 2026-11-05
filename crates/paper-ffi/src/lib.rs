@@ -11,9 +11,10 @@ use std::time::SystemTime;
 
 use paper_engine as engine;
 use paper_engine::{
-    AttachmentFile, AttachmentRow, CollectionNode, Creator, CreatorRole, Identification,
-    ImportedPdf, ItemDetail, ItemFields, ItemKind, ItemQuery, ItemRow, LookupStatus, MetadataPatch,
-    PaperError, PdfStatus, PdfStep, Scope, Settings, SortColumn, Tag, WindowState,
+    Annotation, AnnotationKind, AnnotationPatch, AttachmentFile, AttachmentRow, CollectionNode,
+    Creator, CreatorRole, Identification, ImportedPdf, ItemDetail, ItemFields, ItemKind, ItemQuery,
+    ItemRow, LookupStatus, MetadataPatch, NewAnnotation, PagePoint, PageRect, PaperError,
+    PdfStatus, PdfStep, Quad, Scope, Settings, SortColumn, Tag, WindowState,
 };
 
 uniffi::setup_scaffolding!();
@@ -87,6 +88,12 @@ pub enum SortColumn {
     Journal,
     Year,
     Added,
+}
+
+#[uniffi::remote(Enum)]
+pub enum AnnotationKind {
+    Highlight,
+    Note,
 }
 
 #[uniffi::remote(Error)]
@@ -268,6 +275,63 @@ pub struct CollectionNode {
 }
 
 #[uniffi::remote(Record)]
+pub struct PagePoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[uniffi::remote(Record)]
+pub struct Quad {
+    pub top_left: PagePoint,
+    pub top_right: PagePoint,
+    pub bottom_left: PagePoint,
+    pub bottom_right: PagePoint,
+}
+
+#[uniffi::remote(Record)]
+pub struct PageRect {
+    pub x0: f64,
+    pub y0: f64,
+    pub x1: f64,
+    pub y1: f64,
+}
+
+#[uniffi::remote(Record)]
+pub struct Annotation {
+    pub id: String,
+    pub attachment_id: String,
+    pub kind: AnnotationKind,
+    pub page_index: i32,
+    pub quads: Vec<Quad>,
+    pub rect: PageRect,
+    pub color: String,
+    pub selected_text: Option<String>,
+    pub comment: Option<String>,
+    pub created_at: SystemTime,
+    pub modified_at: SystemTime,
+}
+
+#[uniffi::remote(Record)]
+pub struct NewAnnotation {
+    pub attachment_id: String,
+    pub kind: AnnotationKind,
+    pub page_index: i32,
+    pub quads: Vec<Quad>,
+    pub rect: Option<PageRect>,
+    pub color: String,
+    pub selected_text: Option<String>,
+    pub comment: Option<String>,
+    pub text_before: Option<String>,
+    pub text_after: Option<String>,
+}
+
+#[uniffi::remote(Record)]
+pub struct AnnotationPatch {
+    pub color: Option<String>,
+    pub comment: Option<String>,
+}
+
+#[uniffi::remote(Record)]
 pub struct WindowState {
     pub x: f64,
     pub y: f64,
@@ -440,6 +504,28 @@ impl Engine {
 
     pub fn set_reading_position(&self, id: String, page: i32, zoom: f64) -> Result<(), PaperError> {
         self.0.set_reading_position(&id, page, zoom)
+    }
+
+    // annotations
+
+    pub fn annotations(&self, attachment_id: String) -> Result<Vec<Annotation>, PaperError> {
+        self.0.annotations(&attachment_id)
+    }
+
+    pub fn create_annotation(&self, new: NewAnnotation) -> Result<Annotation, PaperError> {
+        self.0.create_annotation(&new)
+    }
+
+    pub fn update_annotation(
+        &self,
+        id: String,
+        patch: AnnotationPatch,
+    ) -> Result<Annotation, PaperError> {
+        self.0.update_annotation(&id, &patch)
+    }
+
+    pub fn delete_annotation(&self, id: String) -> Result<(), PaperError> {
+        self.0.delete_annotation(&id)
     }
 
     // collections

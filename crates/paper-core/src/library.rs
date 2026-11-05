@@ -936,6 +936,122 @@ impl Library {
     }
 }
 
+impl Library {
+    // ----- annotations -----
+
+    /// The live annotations of an attachment, in reading order: by page, then
+    /// from the top of the page down.
+    pub fn annotations(&self, attachment_id: &str) -> Result<Vec<Annotation>> {
+        let conn = self.conn.lock().unwrap();
+        read_live_attachment(&conn, attachment_id)?;
+        let mut statement = conn.prepare_cached(&format!(
+            "{ANNOTATION_SELECT} WHERE attachment_id = ?1 AND deleted_at IS NULL
+             ORDER BY sort_key, created_at"
+        ))?;
+        let rows = statement.query_map(params![attachment_id], read_annotation)?;
+        let mut annotations = Vec::new();
+        for row in rows {
+            // Kinds this build cannot show are left out, not errors.
+            annotations.extend(row?);
+        }
+        Ok(annotations)
+    }
+
+    pub fn annotation(&self, id: &str) -> Result<Annotation> {
+        let conn = self.conn.lock().unwrap();
+        read_live_annotation(&conn, id)
+    }
+
+    /// Stores a new highlight or note and returns it. A highlight's `rect` is
+    /// the union of its quads; a note keeps only its `rect`.
+    pub fn create_annotation(&self, new: &NewAnnotation) -> Result<Annotation> {
+        let color = normalize_color(&new.color)?;
+        let (quads, rect) = match new.kind {
+            AnnotationKind::Highlight => {
+                let rect = union_of_quads(&new.quads)
+                    .ok_or_else(|| invalid_annotation("a highlight needs at least one quad"))?;
+                (new.quads.as_slice(), rect)
+            }
+            AnnotationKind::Note => {
+                let rect = new
+                    .rect
+                    .ok_or_else(|| invalid_annotation("a note needs a rect"))?;
+                (&[][..], rect)
+            }
+        };
+        if new.page_index < 0 {
+            return Err(invalid_annotation("the page index cannot be negative"));
+        }
+        let id = new_id();
+        let now = time::now();
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let item_id = live_attachment_item(&tx, &new.attachment_id)?;
+        tx.execute(
+            "INSERT INTO annotations (id, attachment_id, kind, page_index, quads, rect, color,
+                selected_text, comment, text_before, text_after, sort_key, created_at, modified_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)",
+            params![
+                id,
+                new.attachment_id,
+                new.kind.as_str(),
+                new.page_index,
+                (!quads.is_empty()).then(|| quads_json(quads)),
+                rect_json(&rect),
+                color,
+                new.selected_text,
+                new.comment
+                    .as_deref()
+                    .filter(|comment| !comment.trim().is_empty()),
+                new.text_before,
+                new.text_after,
+                annotation_sort_key(new.page_index, &rect),
+                now,
+            ],
+        )?;
+        reindex(&tx, &item_id)?;
+        tx.commit()?;
+        read_live_annotation(&conn, &id)
+    }
+
+    /// Changes an annotation's color or comment and returns it.
+    pub fn update_annotation(&self, id: &str, patch: &AnnotationPatch) -> Result<Annotation> {
+        let color = patch.color.as_deref().map(normalize_color).transpose()?;
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let before = read_live_annotation(&tx, id)?;
+        let item_id = live_attachment_item(&tx, &before.attachment_id)?;
+        let comment = match &patch.comment {
+            None => before.comment,
+            Some(comment) if comment.trim().is_empty() => None,
+            Some(comment) => Some(comment.clone()),
+        };
+        tx.execute(
+            "UPDATE annotations SET color = ?2, comment = ?3, modified_at = ?4 WHERE id = ?1",
+            params![id, color.unwrap_or(before.color), comment, time::now()],
+        )?;
+        reindex(&tx, &item_id)?;
+        tx.commit()?;
+        read_live_annotation(&conn, id)
+    }
+
+    /// Moves an annotation to the trash.
+    pub fn delete_annotation(&self, id: &str) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let before = read_live_annotation(&tx, id)?;
+        let item_id = live_attachment_item(&tx, &before.attachment_id)?;
+        let now = time::now();
+        tx.execute(
+            "UPDATE annotations SET deleted_at = ?2, modified_at = ?2 WHERE id = ?1",
+            params![id, now],
+        )?;
+        reindex(&tx, &item_id)?;
+        tx.commit()?;
+        Ok(())
+    }
+}
+
 /// Result of `find_item_by_doi`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DoiMatch {
@@ -975,6 +1091,159 @@ fn read_live_attachment(conn: &Connection, id: &str) -> Result<AttachmentRow> {
     )
     .optional()?
     .ok_or_else(|| PaperError::NotFound { id: id.to_string() })
+}
+
+const ANNOTATION_SELECT: &str = "
+    SELECT id, attachment_id, kind, page_index, quads, rect, color, selected_text, comment,
+           created_at, modified_at
+    FROM annotations";
+
+/// `None` for a kind this build does not know or geometry it cannot read.
+fn read_annotation(row: &Row<'_>) -> rusqlite::Result<Option<Annotation>> {
+    let id: String = row.get("id")?;
+    let Some(kind) = AnnotationKind::from_db(&row.get::<_, String>("kind")?) else {
+        return Ok(None);
+    };
+    let quads = match row.get::<_, Option<String>>("quads")? {
+        Some(json) => parse_quads(&json),
+        None => Some(Vec::new()),
+    };
+    let rect = row
+        .get::<_, Option<String>>("rect")?
+        .and_then(|json| parse_rect(&json));
+    let (Some(quads), Some(rect)) = (quads, rect) else {
+        tracing::warn!(%id, "skipping an annotation with unreadable geometry");
+        return Ok(None);
+    };
+    Ok(Some(Annotation {
+        id,
+        attachment_id: row.get("attachment_id")?,
+        kind,
+        page_index: row.get("page_index")?,
+        quads,
+        rect,
+        color: row.get("color")?,
+        selected_text: row.get("selected_text")?,
+        comment: row.get("comment")?,
+        created_at: time::parse(&row.get::<_, String>("created_at")?),
+        modified_at: time::parse(&row.get::<_, String>("modified_at")?),
+    }))
+}
+
+fn read_live_annotation(conn: &Connection, id: &str) -> Result<Annotation> {
+    conn.query_row(
+        &format!("{ANNOTATION_SELECT} WHERE id = ?1 AND deleted_at IS NULL"),
+        params![id],
+        read_annotation,
+    )
+    .optional()?
+    .flatten()
+    .ok_or_else(|| PaperError::NotFound { id: id.to_string() })
+}
+
+/// The item a live attachment belongs to.
+fn live_attachment_item(conn: &Connection, attachment_id: &str) -> Result<String> {
+    Ok(read_live_attachment(conn, attachment_id)?.item_id)
+}
+
+fn invalid_annotation(message: &str) -> PaperError {
+    PaperError::Library {
+        message: format!("invalid annotation: {message}"),
+    }
+}
+
+/// `#RRGGBB` in uppercase, or an error for anything else.
+fn normalize_color(color: &str) -> Result<String> {
+    let hex = color.strip_prefix('#').unwrap_or("");
+    if hex.len() != 6 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(invalid_annotation(&format!(
+            "{color} is not a #RRGGBB color"
+        )));
+    }
+    Ok(format!("#{}", hex.to_ascii_uppercase()))
+}
+
+fn union_of_quads(quads: &[Quad]) -> Option<PageRect> {
+    let points = quads.iter().flat_map(|quad| {
+        [
+            quad.top_left,
+            quad.top_right,
+            quad.bottom_left,
+            quad.bottom_right,
+        ]
+    });
+    points.fold(None, |rect: Option<PageRect>, point| {
+        Some(match rect {
+            None => PageRect {
+                x0: point.x,
+                y0: point.y,
+                x1: point.x,
+                y1: point.y,
+            },
+            Some(rect) => PageRect {
+                x0: rect.x0.min(point.x),
+                y0: rect.y0.min(point.y),
+                x1: rect.x1.max(point.x),
+                y1: rect.y1.max(point.y),
+            },
+        })
+    })
+}
+
+/// Page first, then the top edge from the top of the page down. PDF user
+/// space grows upwards, so the key counts down from a height no page reaches.
+fn annotation_sort_key(page_index: i32, rect: &PageRect) -> String {
+    const ABOVE_ANY_PAGE: f64 = 1_000_000.0;
+    let top = rect.y0.max(rect.y1);
+    format!(
+        "{page_index:06}:{:014.3}",
+        (ABOVE_ANY_PAGE - top).clamp(0.0, 2.0 * ABOVE_ANY_PAGE)
+    )
+}
+
+/// `[[x1,y1,x2,y2,x3,y3,x4,y4], ...]` in `QuadPoints` order.
+fn quads_json(quads: &[Quad]) -> String {
+    let arrays: Vec<[f64; 8]> = quads
+        .iter()
+        .map(|q| {
+            [
+                q.top_left.x,
+                q.top_left.y,
+                q.top_right.x,
+                q.top_right.y,
+                q.bottom_left.x,
+                q.bottom_left.y,
+                q.bottom_right.x,
+                q.bottom_right.y,
+            ]
+        })
+        .collect();
+    serde_json::to_string(&arrays).expect("numbers serialize")
+}
+
+fn parse_quads(json: &str) -> Option<Vec<Quad>> {
+    let arrays: Vec<[f64; 8]> = serde_json::from_str(json).ok()?;
+    Some(
+        arrays
+            .into_iter()
+            .map(|[x1, y1, x2, y2, x3, y3, x4, y4]| Quad {
+                top_left: PagePoint { x: x1, y: y1 },
+                top_right: PagePoint { x: x2, y: y2 },
+                bottom_left: PagePoint { x: x3, y: y3 },
+                bottom_right: PagePoint { x: x4, y: y4 },
+            })
+            .collect(),
+    )
+}
+
+/// `[x0, y0, x1, y1]`.
+fn rect_json(rect: &PageRect) -> String {
+    serde_json::to_string(&[rect.x0, rect.y0, rect.x1, rect.y1]).expect("numbers serialize")
+}
+
+fn parse_rect(json: &str) -> Option<PageRect> {
+    let [x0, y0, x1, y1]: [f64; 4] = serde_json::from_str(json).ok()?;
+    Some(PageRect { x0, y0, x1, y1 })
 }
 
 /// A file name from a paper title: no path separators or characters that
@@ -2067,5 +2336,168 @@ mod tests {
             "Vaswani et al."
         );
         assert_eq!(format_authors(["", "Only"]), "Only");
+    }
+
+    fn line(x0: f64, y0: f64, x1: f64, y1: f64) -> Quad {
+        Quad {
+            top_left: PagePoint { x: x0, y: y1 },
+            top_right: PagePoint { x: x1, y: y1 },
+            bottom_left: PagePoint { x: x0, y: y0 },
+            bottom_right: PagePoint { x: x1, y: y0 },
+        }
+    }
+
+    #[test]
+    fn annotations_list_in_reading_order_search_and_leave_on_delete() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = Library::create(dir.path().join("Library")).unwrap();
+        let item = library
+            .insert_item(&paper("Diffusion", None, &[], None), LookupStatus::Done)
+            .unwrap();
+        let pdf = library.add_pdf(&item, b"%PDF-1.7", None).unwrap();
+        let new = |kind, page_index, quads: Vec<Quad>, rect| NewAnnotation {
+            attachment_id: pdf.id.clone(),
+            kind,
+            page_index,
+            quads,
+            rect,
+            color: "#ffe58a".into(),
+            selected_text: None,
+            comment: None,
+            text_before: None,
+            text_after: None,
+        };
+
+        // Made out of order: page 1, then the bottom of page 0, then its top.
+        let later_page = library
+            .create_annotation(&new(
+                AnnotationKind::Highlight,
+                1,
+                vec![line(72.0, 700.0, 300.0, 712.0)],
+                None,
+            ))
+            .unwrap();
+        let note = library
+            .create_annotation(&NewAnnotation {
+                comment: Some("check the variance schedule".into()),
+                ..new(
+                    AnnotationKind::Note,
+                    0,
+                    // A note's quads are ignored.
+                    vec![line(0.0, 0.0, 1.0, 1.0)],
+                    Some(PageRect {
+                        x0: 40.0,
+                        y0: 80.0,
+                        x1: 60.0,
+                        y1: 100.0,
+                    }),
+                )
+            })
+            .unwrap();
+        let highlight = library
+            .create_annotation(&NewAnnotation {
+                selected_text: Some("reverse process learns to denoise".into()),
+                // Two lines; the second starts further left and ends lower.
+                ..new(
+                    AnnotationKind::Highlight,
+                    0,
+                    vec![
+                        line(100.0, 600.0, 500.0, 612.0),
+                        line(72.0, 586.0, 250.0, 598.0),
+                    ],
+                    Some(PageRect {
+                        x0: 0.0,
+                        y0: 0.0,
+                        x1: 1.0,
+                        y1: 1.0,
+                    }),
+                )
+            })
+            .unwrap();
+
+        assert_eq!(
+            highlight.rect,
+            PageRect {
+                x0: 72.0,
+                y0: 586.0,
+                x1: 500.0,
+                y1: 612.0
+            },
+            "a highlight's rect is the union of its quads, not what was sent"
+        );
+        assert_eq!(highlight.color, "#FFE58A");
+        assert!(note.quads.is_empty());
+        let ids: Vec<_> = library
+            .annotations(&pdf.id)
+            .unwrap()
+            .into_iter()
+            .map(|a| a.id)
+            .collect();
+        assert_eq!(
+            ids,
+            [highlight.id.clone(), note.id.clone(), later_page.id.clone()]
+        );
+        assert_eq!(library.annotation(&highlight.id).unwrap(), highlight);
+        assert_eq!(titles(&library, &search("denoise")), ["Diffusion"]);
+        assert_eq!(titles(&library, &search("variance")), ["Diffusion"]);
+
+        let recolored = library
+            .update_annotation(
+                &note.id,
+                &AnnotationPatch {
+                    color: Some("#BFD9F2".into()),
+                    comment: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(recolored.color, "#BFD9F2");
+        assert_eq!(
+            recolored.comment, note.comment,
+            "None leaves the comment alone"
+        );
+        let cleared = library
+            .update_annotation(
+                &note.id,
+                &AnnotationPatch {
+                    color: None,
+                    comment: Some("  ".into()),
+                },
+            )
+            .unwrap();
+        assert_eq!(cleared.comment, None);
+        assert!(titles(&library, &search("variance")).is_empty());
+
+        library.delete_annotation(&highlight.id).unwrap();
+        assert_eq!(library.annotations(&pdf.id).unwrap().len(), 2);
+        assert!(titles(&library, &search("denoise")).is_empty());
+        assert!(matches!(
+            library.delete_annotation(&highlight.id),
+            Err(PaperError::NotFound { .. })
+        ));
+
+        for bad in [
+            new(AnnotationKind::Highlight, 0, vec![], None),
+            new(AnnotationKind::Note, 0, vec![], None),
+            new(AnnotationKind::Note, -1, vec![], Some(PageRect::default())),
+            NewAnnotation {
+                color: "yellow".into(),
+                ..new(AnnotationKind::Note, 0, vec![], Some(PageRect::default()))
+            },
+        ] {
+            assert!(
+                matches!(
+                    library.create_annotation(&bad),
+                    Err(PaperError::Library { .. })
+                ),
+                "{bad:?}"
+            );
+        }
+        assert!(matches!(
+            library.create_annotation(&NewAnnotation {
+                attachment_id: "missing".into(),
+                ..new(AnnotationKind::Note, 0, vec![], Some(PageRect::default()))
+            }),
+            Err(PaperError::NotFound { .. })
+        ));
     }
 }

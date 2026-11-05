@@ -19,10 +19,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub use paper_core::{
-    AttachmentFile, AttachmentRow, CollectionNode, Creator, CreatorRole, Identification,
-    ImportedPdf, ItemDetail, ItemFields, ItemKind, ItemQuery, ItemRow, LookupStatus,
-    MAX_RECENT_LIBRARIES, MetadataPatch, PaperError, PdfStatus, PdfStep, RECENTLY_ADDED_DAYS,
-    Scope, Settings, SortColumn, SourceRecord, Tag, WindowState,
+    Annotation, AnnotationKind, AnnotationPatch, AttachmentFile, AttachmentRow, CollectionNode,
+    Creator, CreatorRole, Identification, ImportedPdf, ItemDetail, ItemFields, ItemKind, ItemQuery,
+    ItemRow, LookupStatus, MAX_RECENT_LIBRARIES, MetadataPatch, NewAnnotation, PagePoint, PageRect,
+    PaperError, PdfStatus, PdfStep, Quad, RECENTLY_ADDED_DAYS, Scope, Settings, SortColumn,
+    SourceRecord, Tag, WindowState,
 };
 use paper_core::{Library, SettingsStore};
 pub use paper_fetch::HttpClient;
@@ -522,6 +523,45 @@ impl Engine {
             self.notify(|observer| observer.items_changed(vec![before.item_id.clone()]));
         }
         Ok(())
+    }
+
+    // ----- annotations -----
+
+    /// The highlights and notes of an attachment in reading order.
+    /// Synchronous: the reader calls it once when a PDF opens.
+    pub fn annotations(&self, attachment_id: &str) -> Result<Vec<Annotation>> {
+        self.ensure_open()?;
+        self.library.annotations(attachment_id)
+    }
+
+    /// Stores a highlight or note. Its text joins the item's search index, so
+    /// the observer hears that the item changed.
+    pub fn create_annotation(&self, new: &NewAnnotation) -> Result<Annotation> {
+        self.ensure_open()?;
+        let annotation = self.library.create_annotation(new)?;
+        self.annotations_changed(&annotation.attachment_id);
+        Ok(annotation)
+    }
+
+    pub fn update_annotation(&self, id: &str, patch: &AnnotationPatch) -> Result<Annotation> {
+        self.ensure_open()?;
+        let annotation = self.library.update_annotation(id, patch)?;
+        self.annotations_changed(&annotation.attachment_id);
+        Ok(annotation)
+    }
+
+    pub fn delete_annotation(&self, id: &str) -> Result<()> {
+        self.ensure_open()?;
+        let annotation = self.library.annotation(id)?;
+        self.library.delete_annotation(id)?;
+        self.annotations_changed(&annotation.attachment_id);
+        Ok(())
+    }
+
+    fn annotations_changed(&self, attachment_id: &str) {
+        if let Ok(attachment) = self.library.attachment(attachment_id) {
+            self.notify(|observer| observer.items_changed(vec![attachment.item_id]));
+        }
     }
 
     // ----- collections -----

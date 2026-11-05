@@ -654,6 +654,8 @@ public protocol EngineProtocol: AnyObject, Sendable {
     
     func addToCollection(collectionId: String, itemIds: [String]) throws 
     
+    func annotations(attachmentId: String) throws  -> [Annotation]
+    
     func attachFile(itemId: String, path: String) async throws  -> AttachmentRow
     
     func attachmentFile(id: String) throws  -> AttachmentFile
@@ -664,7 +666,11 @@ public protocol EngineProtocol: AnyObject, Sendable {
     
     func collectionTree() throws  -> [CollectionNode]
     
+    func createAnnotation(new: NewAnnotation) throws  -> Annotation
+    
     func createCollection(name: String, parentId: String?) throws  -> String
+    
+    func deleteAnnotation(id: String) throws 
     
     func deleteCollection(id: String) throws 
     
@@ -707,6 +713,8 @@ public protocol EngineProtocol: AnyObject, Sendable {
     func tags() throws  -> [Tag]
     
     func undoDelete() throws  -> [String]
+    
+    func updateAnnotation(id: String, patch: AnnotationPatch) throws  -> Annotation
     
     func updateMetadata(id: String, patch: MetadataPatch) throws 
     
@@ -810,6 +818,16 @@ open func addToCollection(collectionId: String, itemIds: [String])throws   {try 
 }
 }
     
+open func annotations(attachmentId: String)throws  -> [Annotation]  {
+    return try  FfiConverterSequenceTypeAnnotation.lift(try rustCallWithError(FfiConverterTypePaperError_lift) {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engine_annotations(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(attachmentId),uniffiCallStatus
+    )
+})
+}
+    
 open func attachFile(itemId: String, path: String)async throws  -> AttachmentRow  {
     return
         try  await uniffiRustCallAsync(
@@ -862,6 +880,16 @@ open func collectionTree()throws  -> [CollectionNode]  {
 })
 }
     
+open func createAnnotation(new: NewAnnotation)throws  -> Annotation  {
+    return try  FfiConverterTypeAnnotation_lift(try rustCallWithError(FfiConverterTypePaperError_lift) {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engine_create_annotation(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeNewAnnotation_lower(new),uniffiCallStatus
+    )
+})
+}
+    
 open func createCollection(name: String, parentId: String?)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypePaperError_lift) {
         uniffiCallStatus in
@@ -871,6 +899,15 @@ open func createCollection(name: String, parentId: String?)throws  -> String  {
         FfiConverterOptionString.lower(parentId),uniffiCallStatus
     )
 })
+}
+    
+open func deleteAnnotation(id: String)throws   {try rustCallWithError(FfiConverterTypePaperError_lift) {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engine_delete_annotation(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),uniffiCallStatus
+    )
+}
 }
     
 open func deleteCollection(id: String)throws   {try rustCallWithError(FfiConverterTypePaperError_lift) {
@@ -1091,6 +1128,17 @@ open func undoDelete()throws  -> [String]  {
         uniffiCallStatus in
     uniffi_paper_ffi_fn_method_engine_undo_delete(
             self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+open func updateAnnotation(id: String, patch: AnnotationPatch)throws  -> Annotation  {
+    return try  FfiConverterTypeAnnotation_lift(try rustCallWithError(FfiConverterTypePaperError_lift) {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engine_update_annotation(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(id),
+        FfiConverterTypeAnnotationPatch_lower(patch),uniffiCallStatus
     )
 })
 }
@@ -1542,6 +1590,150 @@ public func FfiConverterTypeEngineObserver_lower(_ value: EngineObserver) -> UIn
 }
 
 
+
+
+public struct Annotation: Equatable, Hashable {
+    public var id: String
+    public var attachmentId: String
+    public var kind: AnnotationKind
+    public var pageIndex: Int32
+    public var quads: [Quad]
+    public var rect: PageRect
+    public var color: String
+    public var selectedText: String?
+    public var comment: String?
+    public var createdAt: Date
+    public var modifiedAt: Date
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, attachmentId: String, kind: AnnotationKind, pageIndex: Int32, quads: [Quad], rect: PageRect, color: String, selectedText: String?, comment: String?, createdAt: Date, modifiedAt: Date) {
+        self.id = id
+        self.attachmentId = attachmentId
+        self.kind = kind
+        self.pageIndex = pageIndex
+        self.quads = quads
+        self.rect = rect
+        self.color = color
+        self.selectedText = selectedText
+        self.comment = comment
+        self.createdAt = createdAt
+        self.modifiedAt = modifiedAt
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension Annotation: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAnnotation: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Annotation {
+        return
+            try Annotation(
+                id: FfiConverterString.read(from: &buf), 
+                attachmentId: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterTypeAnnotationKind.read(from: &buf), 
+                pageIndex: FfiConverterInt32.read(from: &buf), 
+                quads: FfiConverterSequenceTypeQuad.read(from: &buf), 
+                rect: FfiConverterTypePageRect.read(from: &buf), 
+                color: FfiConverterString.read(from: &buf), 
+                selectedText: FfiConverterOptionString.read(from: &buf), 
+                comment: FfiConverterOptionString.read(from: &buf), 
+                createdAt: FfiConverterTimestamp.read(from: &buf), 
+                modifiedAt: FfiConverterTimestamp.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Annotation, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.attachmentId, into: &buf)
+        FfiConverterTypeAnnotationKind.write(value.kind, into: &buf)
+        FfiConverterInt32.write(value.pageIndex, into: &buf)
+        FfiConverterSequenceTypeQuad.write(value.quads, into: &buf)
+        FfiConverterTypePageRect.write(value.rect, into: &buf)
+        FfiConverterString.write(value.color, into: &buf)
+        FfiConverterOptionString.write(value.selectedText, into: &buf)
+        FfiConverterOptionString.write(value.comment, into: &buf)
+        FfiConverterTimestamp.write(value.createdAt, into: &buf)
+        FfiConverterTimestamp.write(value.modifiedAt, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAnnotation_lift(_ buf: RustBuffer) throws -> Annotation {
+    return try FfiConverterTypeAnnotation.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAnnotation_lower(_ value: Annotation) -> RustBuffer {
+    return FfiConverterTypeAnnotation.lower(value)
+}
+
+
+public struct AnnotationPatch: Equatable, Hashable {
+    public var color: String?
+    public var comment: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(color: String?, comment: String?) {
+        self.color = color
+        self.comment = comment
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension AnnotationPatch: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAnnotationPatch: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AnnotationPatch {
+        return
+            try AnnotationPatch(
+                color: FfiConverterOptionString.read(from: &buf), 
+                comment: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: AnnotationPatch, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.color, into: &buf)
+        FfiConverterOptionString.write(value.comment, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAnnotationPatch_lift(_ buf: RustBuffer) throws -> AnnotationPatch {
+    return try FfiConverterTypeAnnotationPatch.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAnnotationPatch_lower(_ value: AnnotationPatch) -> RustBuffer {
+    return FfiConverterTypeAnnotationPatch.lower(value)
+}
 
 
 public struct AttachmentFile: Equatable, Hashable {
@@ -2336,6 +2528,270 @@ public func FfiConverterTypeMetadataPatch_lower(_ value: MetadataPatch) -> RustB
 }
 
 
+public struct NewAnnotation: Equatable, Hashable {
+    public var attachmentId: String
+    public var kind: AnnotationKind
+    public var pageIndex: Int32
+    public var quads: [Quad]
+    public var rect: PageRect?
+    public var color: String
+    public var selectedText: String?
+    public var comment: String?
+    public var textBefore: String?
+    public var textAfter: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(attachmentId: String, kind: AnnotationKind, pageIndex: Int32, quads: [Quad], rect: PageRect?, color: String, selectedText: String?, comment: String?, textBefore: String?, textAfter: String?) {
+        self.attachmentId = attachmentId
+        self.kind = kind
+        self.pageIndex = pageIndex
+        self.quads = quads
+        self.rect = rect
+        self.color = color
+        self.selectedText = selectedText
+        self.comment = comment
+        self.textBefore = textBefore
+        self.textAfter = textAfter
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension NewAnnotation: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNewAnnotation: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NewAnnotation {
+        return
+            try NewAnnotation(
+                attachmentId: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterTypeAnnotationKind.read(from: &buf), 
+                pageIndex: FfiConverterInt32.read(from: &buf), 
+                quads: FfiConverterSequenceTypeQuad.read(from: &buf), 
+                rect: FfiConverterOptionTypePageRect.read(from: &buf), 
+                color: FfiConverterString.read(from: &buf), 
+                selectedText: FfiConverterOptionString.read(from: &buf), 
+                comment: FfiConverterOptionString.read(from: &buf), 
+                textBefore: FfiConverterOptionString.read(from: &buf), 
+                textAfter: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NewAnnotation, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.attachmentId, into: &buf)
+        FfiConverterTypeAnnotationKind.write(value.kind, into: &buf)
+        FfiConverterInt32.write(value.pageIndex, into: &buf)
+        FfiConverterSequenceTypeQuad.write(value.quads, into: &buf)
+        FfiConverterOptionTypePageRect.write(value.rect, into: &buf)
+        FfiConverterString.write(value.color, into: &buf)
+        FfiConverterOptionString.write(value.selectedText, into: &buf)
+        FfiConverterOptionString.write(value.comment, into: &buf)
+        FfiConverterOptionString.write(value.textBefore, into: &buf)
+        FfiConverterOptionString.write(value.textAfter, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNewAnnotation_lift(_ buf: RustBuffer) throws -> NewAnnotation {
+    return try FfiConverterTypeNewAnnotation.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNewAnnotation_lower(_ value: NewAnnotation) -> RustBuffer {
+    return FfiConverterTypeNewAnnotation.lower(value)
+}
+
+
+public struct PagePoint: Equatable, Hashable {
+    public var x: Double
+    public var y: Double
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(x: Double, y: Double) {
+        self.x = x
+        self.y = y
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension PagePoint: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePagePoint: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PagePoint {
+        return
+            try PagePoint(
+                x: FfiConverterDouble.read(from: &buf), 
+                y: FfiConverterDouble.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PagePoint, into buf: inout [UInt8]) {
+        FfiConverterDouble.write(value.x, into: &buf)
+        FfiConverterDouble.write(value.y, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePagePoint_lift(_ buf: RustBuffer) throws -> PagePoint {
+    return try FfiConverterTypePagePoint.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePagePoint_lower(_ value: PagePoint) -> RustBuffer {
+    return FfiConverterTypePagePoint.lower(value)
+}
+
+
+public struct PageRect: Equatable, Hashable {
+    public var x0: Double
+    public var y0: Double
+    public var x1: Double
+    public var y1: Double
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(x0: Double, y0: Double, x1: Double, y1: Double) {
+        self.x0 = x0
+        self.y0 = y0
+        self.x1 = x1
+        self.y1 = y1
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension PageRect: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePageRect: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PageRect {
+        return
+            try PageRect(
+                x0: FfiConverterDouble.read(from: &buf), 
+                y0: FfiConverterDouble.read(from: &buf), 
+                x1: FfiConverterDouble.read(from: &buf), 
+                y1: FfiConverterDouble.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PageRect, into buf: inout [UInt8]) {
+        FfiConverterDouble.write(value.x0, into: &buf)
+        FfiConverterDouble.write(value.y0, into: &buf)
+        FfiConverterDouble.write(value.x1, into: &buf)
+        FfiConverterDouble.write(value.y1, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePageRect_lift(_ buf: RustBuffer) throws -> PageRect {
+    return try FfiConverterTypePageRect.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePageRect_lower(_ value: PageRect) -> RustBuffer {
+    return FfiConverterTypePageRect.lower(value)
+}
+
+
+public struct Quad: Equatable, Hashable {
+    public var topLeft: PagePoint
+    public var topRight: PagePoint
+    public var bottomLeft: PagePoint
+    public var bottomRight: PagePoint
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(topLeft: PagePoint, topRight: PagePoint, bottomLeft: PagePoint, bottomRight: PagePoint) {
+        self.topLeft = topLeft
+        self.topRight = topRight
+        self.bottomLeft = bottomLeft
+        self.bottomRight = bottomRight
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension Quad: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeQuad: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Quad {
+        return
+            try Quad(
+                topLeft: FfiConverterTypePagePoint.read(from: &buf), 
+                topRight: FfiConverterTypePagePoint.read(from: &buf), 
+                bottomLeft: FfiConverterTypePagePoint.read(from: &buf), 
+                bottomRight: FfiConverterTypePagePoint.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Quad, into buf: inout [UInt8]) {
+        FfiConverterTypePagePoint.write(value.topLeft, into: &buf)
+        FfiConverterTypePagePoint.write(value.topRight, into: &buf)
+        FfiConverterTypePagePoint.write(value.bottomLeft, into: &buf)
+        FfiConverterTypePagePoint.write(value.bottomRight, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeQuad_lift(_ buf: RustBuffer) throws -> Quad {
+    return try FfiConverterTypeQuad.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeQuad_lower(_ value: Quad) -> RustBuffer {
+    return FfiConverterTypeQuad.lower(value)
+}
+
+
 public struct Settings: Equatable, Hashable {
     public var contactEmail: String
     public var openalexApiKey: String
@@ -2528,6 +2984,72 @@ public func FfiConverterTypeWindowState_lift(_ buf: RustBuffer) throws -> Window
 public func FfiConverterTypeWindowState_lower(_ value: WindowState) -> RustBuffer {
     return FfiConverterTypeWindowState.lower(value)
 }
+
+
+
+public enum AnnotationKind: Equatable, Hashable {
+    
+    case highlight
+    case note
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension AnnotationKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAnnotationKind: FfiConverterRustBuffer {
+    typealias SwiftType = AnnotationKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AnnotationKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .highlight
+        
+        case 2: return .note
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: AnnotationKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .highlight:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .note:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAnnotationKind_lift(_ buf: RustBuffer) throws -> AnnotationKind {
+    return try FfiConverterTypeAnnotationKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAnnotationKind_lower(_ value: AnnotationKind) -> RustBuffer {
+    return FfiConverterTypeAnnotationKind.lower(value)
+}
+
 
 
 
@@ -3477,6 +3999,30 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypePageRect: FfiConverterRustBuffer {
+    typealias SwiftType = PageRect?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypePageRect.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypePageRect.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeWindowState: FfiConverterRustBuffer {
     typealias SwiftType = WindowState?
 
@@ -3598,6 +4144,31 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeAnnotation: FfiConverterRustBuffer {
+    typealias SwiftType = [Annotation]
+
+    public static func write(_ value: [Annotation], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeAnnotation.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Annotation] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Annotation]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeAnnotation.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeAttachmentRow: FfiConverterRustBuffer {
     typealias SwiftType = [AttachmentRow]
 
@@ -3690,6 +4261,31 @@ fileprivate struct FfiConverterSequenceTypeItemRow: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeItemRow.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeQuad: FfiConverterRustBuffer {
+    typealias SwiftType = [Quad]
+
+    public static func write(_ value: [Quad], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeQuad.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Quad] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Quad]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeQuad.read(from: &buf))
         }
         return seq
     }
@@ -3843,6 +4439,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_paper_ffi_checksum_method_engine_add_to_collection() != 52019) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_paper_ffi_checksum_method_engine_annotations() != 8130) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_paper_ffi_checksum_method_engine_attach_file() != 430) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3858,7 +4457,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_paper_ffi_checksum_method_engine_collection_tree() != 56322) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_paper_ffi_checksum_method_engine_create_annotation() != 3922) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_paper_ffi_checksum_method_engine_create_collection() != 10216) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paper_ffi_checksum_method_engine_delete_annotation() != 44460) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_delete_collection() != 17396) {
@@ -3922,6 +4527,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_undo_delete() != 14067) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paper_ffi_checksum_method_engine_update_annotation() != 53775) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_update_metadata() != 40741) {
