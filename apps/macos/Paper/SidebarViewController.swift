@@ -76,7 +76,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         outlineView.floatsGroupRows = false
         outlineView.rowSizeStyle = .default
         outlineView.indentationPerLevel = Theme.Size.padding
-        outlineView.autoresizesOutlineColumn = true
+        // On, expanding the groups at launch widens the column by one indentation
+        // level past the clip view, which cuts off the selection and the badges
+        // until the sidebar is resized. The column follows the sidebar width instead.
+        outlineView.autoresizesOutlineColumn = false
         outlineView.allowsEmptySelection = false
         outlineView.dataSource = self
         outlineView.delegate = self
