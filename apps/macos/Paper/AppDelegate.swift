@@ -273,10 +273,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(.separator())
         editMenu.addItem(withTitle: "Search Library…", action: #selector(MainWindowController.showSearch(_:)), keyEquivalent: "p")
-        // ⌘F is what Mac users reach for first; it opens the same palette
-        // without a second visible menu entry.
-        let find = editMenu.addItem(withTitle: "Find", action: #selector(MainWindowController.showSearch(_:)), keyEquivalent: "f")
-        find.isHidden = true
+        // In a PDF, ⌘F finds text in it; in the library it opens the palette.
+        editMenu.addItem(withTitle: "Find…", action: #selector(MainWindowController.find(_:)), keyEquivalent: "f")
+        editMenu.addItem(withTitle: "Find Next", action: #selector(MainWindowController.findNext(_:)), keyEquivalent: "g")
+        let findPrevious = editMenu.addItem(withTitle: "Find Previous", action: #selector(MainWindowController.findPrevious(_:)), keyEquivalent: "g")
+        findPrevious.keyEquivalentModifierMask = [.command, .shift]
 
         let paperMenu = NSMenu(title: "Paper")
         let openItem = paperMenu.addItem(withTitle: "Open PDF", action: #selector(MainWindowController.openSelectedPaper(_:)), keyEquivalent: String(Character(UnicodeScalar(NSDownArrowFunctionKey)!)))

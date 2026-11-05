@@ -336,7 +336,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         switch node.kind {
         case .group(let title):
             let cell = outlineView.makeView(withIdentifier: Self.groupIdentifier, owner: self) as? NSTableCellView
-                ?? makeGroupCell()
+                ?? Self.makeGroupCell(identifier: Self.groupIdentifier)
             cell.textField?.stringValue = title
             return cell
         case .smartList(let scope, let title, let symbol):
@@ -362,9 +362,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             ?? SidebarCellView(identifier: Self.cellIdentifier)
     }
 
-    private func makeGroupCell() -> NSTableCellView {
+    /// A group label row; the reader's table of contents uses it too.
+    static func makeGroupCell(identifier: NSUserInterfaceItemIdentifier) -> NSTableCellView {
         let cell = NSTableCellView()
-        cell.identifier = Self.groupIdentifier
+        cell.identifier = identifier
         let label = NSTextField(labelWithString: "")
         label.translatesAutoresizingMaskIntoConstraints = false
         cell.addSubview(label)

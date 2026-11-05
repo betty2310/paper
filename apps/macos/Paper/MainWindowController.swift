@@ -5,9 +5,10 @@ import SwiftUI
 
 /// One window per open library: a unified toolbar over a three column split
 /// view (sidebar, center, inspector). The toolbar, the sidebar, and the
-/// inspector share one translucent chrome; the center is a rounded card set
-/// into it, showing the paper list or one of the open PDFs, chosen by the
-/// tabs in the toolbar. Commands are
+/// inspector share one translucent chrome; the center is a card set into it,
+/// showing the paper list or one of the open PDFs, chosen by the tabs in the
+/// toolbar. While a PDF is in front, the sidebar shows its table of contents
+/// instead of the library's lists. Commands are
 /// selectors on the responder chain so menu items, toolbar buttons, and
 /// SwiftUI buttons share one code path.
 @MainActor
@@ -15,6 +16,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     let store: LibraryStore
     let splitViewController = NSSplitViewController()
     let sidebar: SidebarViewController
+    /// The library's lists, or the table of contents of the PDF in front.
+    private let sidebarContent: SidebarContentViewController
     let list: PaperListViewController
     let inspector: InspectorViewController
     private let center: TabContentViewController
@@ -48,6 +51,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     init(store: LibraryStore) {
         self.store = store
         sidebar = SidebarViewController(store: store)
+        sidebarContent = SidebarContentViewController(showing: sidebar)
         list = PaperListViewController(store: store)
         inspector = InspectorViewController(store: store)
         center = TabContentViewController(showing: list)
@@ -78,7 +82,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
 
-        let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebar)
+        let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarContent)
         sidebarItem.minimumThickness = Theme.Size.sidebarMinWidth
         sidebarItem.maximumThickness = Theme.Size.sidebarMaxWidth
         sidebarItem.canCollapse = true
@@ -215,6 +219,18 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         }
     }
 
+    /// ⌘F finds text in the PDF in front, and searches the library otherwise.
+    @objc func find(_ sender: Any?) {
+        if let activeReader {
+            activeReader.showFind()
+        } else {
+            showSearch(sender)
+        }
+    }
+
+    @objc func findNext(_ sender: Any?) { activeReader?.findNext() }
+    @objc func findPrevious(_ sender: Any?) { activeReader?.findPrevious() }
+
     @objc func showSearch(_ sender: Any?) {
         guard let window else { return }
         showLibrary()
@@ -277,6 +293,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             return activeReader?.canZoomOut ?? false
         case #selector(zoomToFitWidth(_:)), #selector(addNote(_:)):
             return activeReader != nil
+        case #selector(findNext(_:)), #selector(findPrevious(_:)):
+            return activeReader?.hasFindMatches ?? false
         case #selector(navigateBack(_:)):
             return activeReader?.canGoBack ?? false
         case #selector(navigateForward(_:)):
@@ -379,6 +397,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         reader.savePosition()
         activeReader = nil
         center.show(list, animated: true)
+        sidebarContent.show(sidebar, from: .reader)
         updateTabs()
         showLibraryToolbarItems(true)
         window?.makeFirstResponder(list.tableView)
@@ -387,6 +406,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private func activate(_ reader: ReaderViewController, landing: Bool = false) {
         guard activeReader !== reader else { return }
         activeReader?.savePosition()
+        sidebarContent.show(reader.outline, from: activeReader == nil ? .library : .reader)
         activeReader = reader
         center.show(reader, animated: true)
         updateTabs(landing: landing ? reader.itemId : nil)
@@ -413,11 +433,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             updateTabs()
         }
         center.remove(reader)
+        sidebarContent.remove(reader.outline)
     }
 
     /// Like `showLibrary`, for when the reader in front has just closed.
     private func showLibraryAfterClosing() {
         center.show(list, animated: true)
+        sidebarContent.show(sidebar, from: .reader)
         updateTabs()
         showLibraryToolbarItems(true)
         window?.makeFirstResponder(list.tableView)
@@ -614,7 +636,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     func windowWillClose(_ notification: Notification) {
         readers.forEach { $0.close() }
         var settings = store.settings
-        settings.sidebarWidth = splitViewController.splitViewItems[0].isCollapsed ? settings.sidebarWidth : sidebar.view.frame.width
+        settings.sidebarWidth = splitViewController.splitViewItems[0].isCollapsed ? settings.sidebarWidth : sidebarContent.view.frame.width
         settings.detailWidth = inspectorItem.isCollapsed ? settings.detailWidth : inspector.view.frame.width
         if let frame = window?.frame {
             settings.window = WindowState(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height)
@@ -625,9 +647,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 }
 
-/// The center of the window: the paper list or one reader on a rounded card,
-/// cross faded when the tab changes. The card starts under the toolbar and
-/// keeps a margin from the window's edges and the panels. Readers stay alive
+/// The center of the window: the paper list or one reader on a card, cross
+/// faded when the tab changes. The card starts under the toolbar and reaches
+/// the window's bottom edge and the panels beside it. Readers stay alive
 /// while their tab is open, so switching back keeps the page and zoom.
 @MainActor
 final class TabContentViewController: NSViewController {
@@ -647,12 +669,11 @@ final class TabContentViewController: NSViewController {
         let root = NSView()
         card.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(card)
-        let margin = Theme.Size.contentMargin
         NSLayoutConstraint.activate([
             card.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
-            card.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: margin),
-            card.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -margin),
-            card.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -margin),
+            card.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            card.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         view = root
         pin(current.view)
@@ -692,7 +713,111 @@ final class TabContentViewController: NSViewController {
     }
 }
 
-/// A rounded card with a one pixel border that clips what it holds.
+/// The sidebar column: the library's lists while the library is in front,
+/// and the table of contents of the PDF in front otherwise. Going from the
+/// library to a PDF, the lists slide out to the leading side as the contents
+/// slide in from the trailing side, and back again the other way; between
+/// two PDFs the contents cross fade.
+@MainActor
+final class SidebarContentViewController: NSViewController {
+    /// What the sidebar showed before.
+    enum Origin {
+        case library
+        case reader
+    }
+
+    private(set) var current: NSViewController
+    /// Each shown column's leading constraint, which the slide moves.
+    private var leading: [ObjectIdentifier: NSLayoutConstraint] = [:]
+
+    init(showing initial: NSViewController) {
+        current = initial
+        super.init(nibName: nil, bundle: nil)
+        addChild(initial)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func loadView() {
+        let root = NSView()
+        root.wantsLayer = true
+        view = root
+        pin(current.view)
+    }
+
+    func show(_ controller: NSViewController, from origin: Origin) {
+        guard controller !== current else { return }
+        if controller.parent == nil { addChild(controller) }
+        let old = current.view
+        let new = controller.view
+        current = controller
+        pin(new)
+        guard view.window != nil, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            unpin(old)
+            return
+        }
+        // Toward the library is backward, so it slides the other way.
+        let offset: CGFloat = switch origin {
+        case .library: Theme.Size.sidebarSlide
+        case .reader: controller is SidebarViewController ? -Theme.Size.sidebarSlide : 0
+        }
+        new.alphaValue = 0
+        leading[ObjectIdentifier(new)]?.constant = offset
+        view.layoutSubtreeIfNeeded()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Theme.Duration.tabSwitch
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.allowsImplicitAnimation = true
+            new.animator().alphaValue = 1
+            old.animator().alphaValue = 0
+            leading[ObjectIdentifier(new)]?.animator().constant = 0
+            leading[ObjectIdentifier(old)]?.animator().constant = -offset
+            view.layoutSubtreeIfNeeded()
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                // Unless it came back while sliding out.
+                guard let self, old !== self.current.view else { return }
+                self.unpin(old)
+            }
+        }
+    }
+
+    /// Forgets a closed reader's contents.
+    func remove(_ controller: NSViewController) {
+        guard controller !== current else { return }
+        unpin(controller.view)
+        controller.removeFromParent()
+    }
+
+    /// Puts a column in place, or back in place if it was sliding out.
+    private func pin(_ subview: NSView) {
+        subview.alphaValue = 1
+        if let constraint = leading[ObjectIdentifier(subview)] {
+            constraint.constant = 0
+            return
+        }
+        subview.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(subview)
+        let start = subview.leadingAnchor.constraint(equalTo: view.leadingAnchor)
+        leading[ObjectIdentifier(subview)] = start
+        NSLayoutConstraint.activate([
+            start,
+            subview.topAnchor.constraint(equalTo: view.topAnchor),
+            subview.widthAnchor.constraint(equalTo: view.widthAnchor),
+            subview.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+    }
+
+    private func unpin(_ subview: NSView) {
+        leading[ObjectIdentifier(subview)] = nil
+        subview.removeFromSuperview()
+        subview.alphaValue = 1
+    }
+}
+
+/// A card with a one pixel border that clips what it holds. Only its top
+/// corners are rounded: the bottom ones sit in the window's own corners.
 @MainActor
 final class ContentCardView: NSView {
     init() {
@@ -700,6 +825,8 @@ final class ContentCardView: NSView {
         wantsLayer = true
         layer?.cornerRadius = Theme.Size.contentRadius
         layer?.cornerCurve = .continuous
+        // A view's layer is not flipped, so the top is at max y.
+        layer?.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
         layer?.masksToBounds = true
     }
 
@@ -724,7 +851,7 @@ final class ContentCardView: NSView {
 }
 
 /// The window's split view, over one translucent chrome that shows wherever
-/// the columns leave room. Its dividers are invisible: the card's margin
+/// the columns leave room. Its dividers are invisible: the card's border
 /// separates the columns. The controller inserts column views as they load,
 /// above anything added before; the chrome moves back to the bottom and the
 /// toasts to the top.

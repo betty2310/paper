@@ -14,6 +14,8 @@ import SwiftUI
 /// Following a link inside the PDF, such as a citation, remembers where the
 /// reader was, and Back returns there. Highlights and sticky notes are stored
 /// by the engine and drawn as `PDFAnnotation`s on the in-memory document.
+/// The PDF's outline is the table of contents in the sidebar, and ⌘F finds
+/// text with PDFKit's search, marking every match on the pages.
 @MainActor
 final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPopoverDelegate {
     let store: LibraryStore
@@ -21,7 +23,8 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
     let attachmentId: String
     /// The paper's title, shown in the tab.
     let paperTitle: String
-
+    /// The table of contents, shown in the sidebar while this tab is in front.
+    let outline = ReaderOutlineViewController()
 
     private let file: AttachmentFile
     private let pdfView = ReaderPDFView()
@@ -54,6 +57,16 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
     /// After Add Note, the next click on a page places it.
     private(set) var isPlacingNote = false
     private var noteEditor: (id: String, model: NoteEditorModel, popover: NSPopover)?
+    /// The find bar, which floats at the top trailing corner while it is open.
+    private let findModel = ReaderFindModel()
+    private lazy var findBar = NSHostingView(rootView: ReaderFindBar(model: findModel))
+    /// The current search's matches in document order, as PDFKit finds them.
+    private var matches: [PDFSelection] = []
+    private var matchIndex: Int?
+    /// Searches asked for whose start PDFKit has not announced yet. Matches
+    /// that arrive before then belong to a search that was replaced.
+    private var pendingFinds = 0
+    private var findTimer: Timer?
     /// Characters of page text kept on each side of a highlight, so it can be
     /// found again if the PDF is ever replaced.
     private static let contextLength = 32
@@ -100,6 +113,11 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         barModel.zoomOut = { [weak self] in self?.zoomOut() }
         barModel.fitWidth = { [weak self] in self?.fitWidth() }
         barModel.highlight = { [weak self] in self?.highlightSelection() }
+        findModel.changed = { [weak self] in self?.scheduleFind() }
+        findModel.next = { [weak self] in self?.findNext() }
+        findModel.previous = { [weak self] in self?.findPrevious() }
+        findModel.close = { [weak self] in self?.closeFind() }
+        outline.onSelect = { [weak self] destination in self?.go(to: destination) }
         barModel.addNote = { [weak self] in
             guard let self else { return }
             if isPlacingNote { stopPlacingNote() } else { startPlacingNote() }
@@ -130,9 +148,9 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         _ = view
         let url = URL(fileURLWithPath: file.path)
         let opened = await Task.detached(priority: .userInitiated) {
-            DocumentBox(document: PDFDocument(url: url))
+            PDFKitBox(value: PDFDocument(url: url))
         }.value
-        show(opened.document)
+        show(opened.value)
     }
 
     private var restoredPage = false
@@ -160,6 +178,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
             return
         }
         pdfView.document = document
+        outline.load(document)
         for annotation in store.annotations(attachmentId: attachmentId) {
             draw(annotation)
         }
@@ -181,12 +200,25 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
             NotificationCenter.default.addObserver(forName: .PDFViewSelectionChanged, object: pdfView, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.selectionChanged() }
             },
+            NotificationCenter.default.addObserver(forName: .PDFDocumentDidBeginFind, object: document, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.findBegan() }
+            },
+            NotificationCenter.default.addObserver(forName: .PDFDocumentDidFindMatch, object: document, queue: .main) { [weak self] notification in
+                let match = PDFKitBox(value: notification.userInfo?["PDFDocumentFoundSelection"] as? PDFSelection)
+                MainActor.assumeIsolated { if let selection = match.value { self?.found(selection) } }
+            },
+            NotificationCenter.default.addObserver(forName: .PDFDocumentDidEndFind, object: document, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.findEnded() }
+            },
         ]
         // Scrolling moves the text under the toolbar; the toolbar follows.
         if let clipView = pdfView.documentView?.enclosingScrollView?.contentView {
             clipView.postsBoundsChangedNotifications = true
             observers.append(NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: clipView, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.positionMarkupBar() }
+                MainActor.assumeIsolated {
+                    self?.positionMarkupBar()
+                    self?.updateOutline()
+                }
             })
         }
         updateBar()
@@ -231,7 +263,14 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
 
     private func pageChanged() {
         updateBar()
+        updateOutline()
         scheduleSave()
+    }
+
+    /// Keeps the table of contents on the part at the top of the view.
+    private func updateOutline() {
+        guard let document = pdfView.document, let here = pdfView.currentDestination, let page = here.page else { return }
+        outline.reveal(here, pageIndex: document.index(for: page))
     }
 
     /// Brings the floating controls up to date with the page and zoom.
@@ -265,6 +304,8 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
 
     /// Called when the tab closes.
     func close() {
+        findTimer?.invalidate()
+        pdfView.document?.cancelFindString()
         finishEditingNote()
         savePosition()
         observers.forEach(NotificationCenter.default.removeObserver)
@@ -308,6 +349,14 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
 
     private static func differ(_ first: PDFDestination, _ second: PDFDestination) -> Bool {
         first.page != second.page || abs(first.point.y - second.point.y) > 1 || abs(first.point.x - second.point.x) > 1
+    }
+
+    /// A table of contents entry was picked. Like a link, Back returns.
+    private func go(to destination: PDFDestination) {
+        let origin = pdfView.currentDestination
+        pdfView.go(to: destination)
+        guard let origin else { return }
+        DispatchQueue.main.async { [weak self] in self?.linkFollowed(from: origin) }
     }
 
     private func historyChanged() {
@@ -552,6 +601,126 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         markupBar.frame = view.backingAlignedRect(CGRect(origin: origin, size: size), options: .alignAllEdgesNearest)
     }
 
+    // MARK: Find
+
+    var hasFindMatches: Bool { findBar.superview != nil && !matches.isEmpty }
+
+    /// Opens the find bar, or focuses its field again. Opening it with a one
+    /// line selection finds that text.
+    func showFind() {
+        guard pdfView.document != nil else { return }
+        if findBar.superview == nil, let text = selectedText?.string?.trimmingCharacters(in: .whitespacesAndNewlines), !text.contains(where: \.isNewline) {
+            findModel.query = text
+        }
+        if findBar.superview == nil {
+            // The hosting view includes room for the capsule's shadow.
+            let shadow = Theme.Toast.shadowRadius + Theme.Toast.shadowY
+            findBar.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(findBar)
+            NSLayoutConstraint.activate([
+                findBar.topAnchor.constraint(equalTo: view.topAnchor, constant: Theme.Size.readerBarInset - shadow),
+                findBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: shadow - Theme.Size.readerBarInset),
+            ])
+            findBar.alphaValue = 0
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = Theme.Duration.panel
+                findBar.animator().alphaValue = 1
+            }
+            startFind()
+        }
+        // SwiftUI moves focus to the field only inside a hosting view that
+        // is already the first responder, and once it is in the window.
+        view.window?.makeFirstResponder(findBar)
+        DispatchQueue.main.async { [weak self] in self?.findModel.focusRequest += 1 }
+    }
+
+    /// Closes the find bar and clears the marks. The text stays for next time.
+    func closeFind() {
+        findTimer?.invalidate()
+        pdfView.document?.cancelFindString()
+        matches = []
+        matchIndex = nil
+        pdfView.highlightedSelections = nil
+        pdfView.clearSelection()
+        // Removed rather than hidden, so its buttons get fresh hover tracking.
+        findBar.removeFromSuperview()
+        focus()
+    }
+
+    func findNext() { step(by: 1) }
+    func findPrevious() { step(by: -1) }
+
+    private func step(by offset: Int) {
+        guard !matches.isEmpty else { return }
+        let start = matchIndex ?? (offset > 0 ? -1 : 0)
+        select(match: (start + offset + matches.count) % matches.count)
+    }
+
+    private func scheduleFind() {
+        findTimer?.invalidate()
+        findTimer = Timer.scheduledTimer(withTimeInterval: Theme.Duration.findDelay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.startFind() }
+        }
+    }
+
+    /// Starts a search for the field's text on PDFKit's thread. Matches come
+    /// back one at a time through the document's notifications.
+    private func startFind() {
+        guard let document = pdfView.document else { return }
+        document.cancelFindString()
+        matches = []
+        matchIndex = nil
+        pdfView.highlightedSelections = nil
+        let query = findModel.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        findModel.matchCount = 0
+        findModel.current = 0
+        findModel.isSearching = !query.isEmpty
+        guard !query.isEmpty else { return }
+        pendingFinds += 1
+        document.beginFindString(query, withOptions: [.caseInsensitive, .diacriticInsensitive])
+    }
+
+    private func findBegan() {
+        pendingFinds = max(0, pendingFinds - 1)
+    }
+
+    /// Counts the match, and goes to the first one at or after the page
+    /// being read.
+    private func found(_ match: PDFSelection) {
+        guard pendingFinds == 0, findBar.superview != nil, let document = pdfView.document else { return }
+        match.color = Theme.Color.findMatch
+        matches.append(match)
+        findModel.matchCount = matches.count
+        guard matchIndex == nil, let page = match.pages.first, let current = pdfView.currentPage,
+              document.index(for: page) >= document.index(for: current)
+        else { return }
+        select(match: matches.count - 1)
+    }
+
+    private func findEnded() {
+        guard pendingFinds == 0, findBar.superview != nil else { return }
+        findModel.isSearching = false
+        if matchIndex == nil, !matches.isEmpty {
+            select(match: 0)
+        } else {
+            showMatches()
+        }
+    }
+
+    private func select(match index: Int) {
+        matchIndex = index
+        findModel.current = index + 1
+        pdfView.go(to: matches[index])
+        // The current match is selected, with PDFKit's pulse, as in Preview.
+        pdfView.setCurrentSelection(matches[index], animate: true)
+        showMatches()
+    }
+
+    /// Marks every match on the pages.
+    private func showMatches() {
+        pdfView.highlightedSelections = matches
+    }
+
     // MARK: Notes
 
     /// Add Note: the next click on a page places a note there. Escape cancels.
@@ -574,6 +743,8 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
             stopPlacingNote()
         } else if markupTarget != nil {
             hideMarkupBar()
+        } else if findBar.superview != nil {
+            closeFind()
         } else {
             super.cancelOperation(sender)
         }
@@ -712,8 +883,9 @@ private final class MenuAction: NSMenuItem {
     @objc private func runAction() { run() }
 }
 
-/// Carries a document from the task that opened it to the main actor.
-/// `PDFDocument` is not `Sendable`, but nothing touches it in between.
-private struct DocumentBox: @unchecked Sendable {
-    let document: PDFDocument?
+/// Carries a document from the task that opened it, or a find match from
+/// PDFKit's search thread, to the main actor. PDFKit's objects are not
+/// `Sendable`, but nothing touches them in between.
+private struct PDFKitBox<Value>: @unchecked Sendable {
+    let value: Value
 }

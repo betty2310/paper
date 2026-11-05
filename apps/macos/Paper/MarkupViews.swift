@@ -145,7 +145,6 @@ final class ReaderBarModel: ObservableObject {
 /// and the two kinds of markup.
 struct ReaderBar: View {
     @ObservedObject var model: ReaderBarModel
-    @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -192,12 +191,7 @@ struct ReaderBar: View {
             icon(Theme.Symbol.note, "Add Note", selected: model.isPlacingNote, action: model.addNote)
                 .help(model.isPlacingNote ? "Cancel (Esc)" : "Add a note, then click where it goes (⌃⌘N)")
         }
-        .padding(.horizontal, Theme.Size.readerBarPadding)
-        .frame(height: Theme.Toast.height)
-        .background(Theme.Color.swiftUIToastBackground, in: Capsule())
-        .overlay(Capsule().strokeBorder(Theme.Color.swiftUISeparator, lineWidth: 1 / displayScale))
-        .shadow(color: Theme.Toast.shadowColor, radius: Theme.Toast.shadowRadius, y: Theme.Toast.shadowY)
-        .shadow(color: Theme.Toast.contactShadowColor, radius: Theme.Toast.contactShadowRadius, y: Theme.Toast.contactShadowY)
+        .modifier(ReaderCapsule())
         .animation(reduceMotion ? nil : Theme.Toast.contentAnimation, value: model.backPage)
         .animation(reduceMotion ? nil : Theme.Toast.contentAnimation, value: model.isPlacingNote)
         .animation(reduceMotion ? nil : Theme.Toast.contentAnimation, value: model.zoomPercent)
@@ -222,6 +216,108 @@ struct ReaderBar: View {
         .disabled(!enabled)
         .accessibilityLabel(label)
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// What the find bar shows, and what it does.
+@MainActor
+final class ReaderFindModel: ObservableObject {
+    @Published var query = "" {
+        didSet { if query != oldValue { changed() } }
+    }
+    @Published var matchCount = 0
+    /// 1 based; 0 while no match is selected.
+    @Published var current = 0
+    @Published var isSearching = false
+    /// Bumped to put the keyboard in the field.
+    @Published var focusRequest = 0
+    var changed: () -> Void = {}
+    var next: () -> Void = {}
+    var previous: () -> Void = {}
+    var close: () -> Void = {}
+}
+
+/// Find in the PDF: a capsule like the reader's controls at the top
+/// trailing corner of the page, with the field, the match count, Previous
+/// and Next, and Done. Return goes to the next match and Shift Return to the
+/// previous one; Escape closes it.
+struct ReaderFindBar: View {
+    @ObservedObject var model: ReaderFindModel
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: Theme.Size.readerBarSpacing) {
+            Image(systemName: Theme.Symbol.search)
+                .font(Theme.Font.swiftUIReaderBarIcon)
+                .foregroundStyle(Theme.Color.swiftUISecondaryText)
+                .padding(.leading, Theme.Size.readerBarPadding)
+                .accessibilityHidden(true)
+            TextField("Find in PDF", text: $model.query)
+                .textFieldStyle(.plain)
+                .font(Theme.Font.swiftUIBody)
+                .frame(width: Theme.Size.findFieldWidth)
+                .padding(.horizontal, Theme.Size.smallGap)
+                .focused($focused)
+                .onSubmit { model.next() }
+                .onKeyPress(.return, phases: .down) { press in
+                    guard press.modifiers.contains(.shift) else { return .ignored }
+                    model.previous()
+                    return .handled
+                }
+                .onExitCommand { model.close() }
+                .accessibilityLabel("Find in PDF")
+            Text(countLabel)
+                .font(Theme.Font.swiftUIReaderBarLabel)
+                .foregroundStyle(Theme.Color.swiftUISecondaryText)
+                .lineLimit(1)
+                .frame(width: Theme.Size.findCountWidth, alignment: .trailing)
+                .accessibilityLabel(countLabel)
+            Divider()
+                .frame(height: Theme.Size.iconSize)
+                .padding(.horizontal, Theme.Size.smallGap)
+            Button(action: model.previous) { Image(systemName: Theme.Symbol.findPrevious) }
+                .buttonStyle(ReaderBarButtonStyle())
+                .disabled(model.matchCount == 0)
+                .help("Previous match (⇧⌘G)")
+                .accessibilityLabel("Previous Match")
+            Button(action: model.next) { Image(systemName: Theme.Symbol.findNext) }
+                .buttonStyle(ReaderBarButtonStyle())
+                .disabled(model.matchCount == 0)
+                .help("Next match (⌘G)")
+                .accessibilityLabel("Next Match")
+            Button("Done", action: model.close)
+                .buttonStyle(ReaderBarButtonStyle())
+                .help("Close (Esc)")
+        }
+        .padding(.horizontal, Theme.Size.readerBarPadding)
+        .modifier(ReaderCapsule())
+        .padding(Theme.Toast.shadowRadius + Theme.Toast.shadowY)
+        .fixedSize()
+        .onChange(of: model.focusRequest) { focused = true }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Find")
+    }
+
+    private var countLabel: String {
+        if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "" }
+        if model.matchCount == 0 { return model.isSearching ? "" : "No matches" }
+        if model.current == 0 { return model.matchCount == 1 ? "1 match" : "\(model.matchCount) matches" }
+        return "\(model.current) of \(model.matchCount)"
+    }
+}
+
+/// The opaque capsule the reader's floating controls sit in, styled like the
+/// toasts: a hairline border and a soft shadow.
+private struct ReaderCapsule: ViewModifier {
+    @Environment(\.displayScale) private var displayScale
+
+    func body(content: Content) -> some View {
+        content
+            .frame(height: Theme.Toast.height)
+            .background(Theme.Color.swiftUIToastBackground, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.Color.swiftUISeparator, lineWidth: 1 / displayScale))
+            .shadow(color: Theme.Toast.shadowColor, radius: Theme.Toast.shadowRadius, y: Theme.Toast.shadowY)
+            .shadow(color: Theme.Toast.contactShadowColor, radius: Theme.Toast.contactShadowRadius, y: Theme.Toast.contactShadowY)
     }
 }
 

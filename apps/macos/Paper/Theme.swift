@@ -78,10 +78,18 @@ enum Theme {
         static let tabPadding: CGFloat = 10
         static let tabSpacing: CGFloat = 2
         static let tabCloseSize: CGFloat = 16
-        /// The paper list or the PDF in front sits on a rounded card, this far
-        /// from the window's edges and the panels beside it.
-        static let contentMargin: CGFloat = 8
+        /// The paper list or the PDF in front sits on a card whose top
+        /// corners are rounded.
         static let contentRadius: CGFloat = 10
+        /// How far the sidebar's lists and a PDF's table of contents travel
+        /// as one replaces the other.
+        static let sidebarSlide: CGFloat = 24
+        /// A table of contents entry counts as on screen when it starts this
+        /// far below the top of the view, in PDF points.
+        static let outlinePositionSlop: CGFloat = 8
+        /// The find bar's field, and room for "128 of 340" so it keeps its width.
+        static let findFieldWidth: CGFloat = 180
+        static let findCountWidth: CGFloat = 76
         /// The reader's floating controls, over the bottom of the page.
         static let readerBarInset: CGFloat = 16
         static let readerBarButton: CGFloat = 28
@@ -149,6 +157,8 @@ enum Theme {
         static let tabSelected = NSColor.controlBackgroundColor
         static let tabHover = NSColor.labelColor.withAlphaComponent(0.06)
         static let tabPressed = NSColor.labelColor.withAlphaComponent(0.1)
+        /// Find matches on the page; the current one is the selection.
+        static let findMatch = NSColor.findHighlightColor
         static let swiftUIReaderBackground = SwiftUI.Color(nsColor: readerBackground)
         /// Toasts: an opaque capsule, white in Light Mode, with a gray close button.
         static let swiftUIToastBackground = SwiftUI.Color(nsColor: .controlBackgroundColor)
@@ -238,6 +248,8 @@ enum Theme {
         static let tabSwitch: TimeInterval = 0.2
         /// Pages fading in once PDFKit has the document.
         static let documentFade: TimeInterval = 0.15
+        /// Keystrokes to wait before the find bar searches.
+        static let findDelay: TimeInterval = 0.15
         /// Page turns to wait before the reading position is saved.
         static let readingPositionSave: TimeInterval = 1
     }
@@ -353,5 +365,7 @@ enum Theme {
         static let note = "note.text"
         static let highlight = "highlighter"
         static let fitWidth = "arrow.left.and.right"
+        static let findPrevious = "chevron.up"
+        static let findNext = "chevron.down"
     }
 }
