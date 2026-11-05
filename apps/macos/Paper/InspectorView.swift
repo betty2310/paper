@@ -41,8 +41,8 @@ struct InspectorView: View {
                 NoSelectionView()
             }
         }
+        // No background of its own: the inspector sits on the window's chrome.
         .frame(minWidth: Theme.Size.inspectorMinWidth, maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: Theme.Color.inspectorBackground))
     }
 }
 

@@ -60,21 +60,56 @@ enum Theme {
         static let welcomeWidth: CGFloat = 520
         static let welcomeHeight: CGFloat = 420
         static let settingsWidth: CGFloat = 460
-        /// Tabs in the toolbar, one per open PDF after the Library tab.
-        static let tabHeight: CGFloat = 28
-        static let tabMinWidth: CGFloat = 96
-        static let tabMaxWidth: CGFloat = 240
+        /// The title and subtitle at the start of the toolbar, placed where
+        /// the system puts its own: baselines from the top and between lines.
+        static let windowTitleHeight: CGFloat = 32
+        static let windowTitleBaseline: CGFloat = 14
+        static let windowSubtitleBaseline: CGFloat = 14
+        static let windowTitleInset: CGFloat = 3.75
+        /// The tabs sit in a track as tall as the title and subtitle, one
+        /// per open PDF after the Library tab.
+        static let tabTrackHeight: CGFloat = windowTitleHeight
+        static let tabTrackInset: CGFloat = 2
+        static let tabHeight: CGFloat = tabTrackHeight - tabTrackInset * 2
+        /// The narrowest a crowded tab gets: its icon and padding.
+        static let tabMinWidth: CGFloat = 36
+        /// Narrower than this, a tab shows only its icon.
+        static let tabCompactWidth: CGFloat = 100
         static let tabPadding: CGFloat = 10
         static let tabSpacing: CGFloat = 2
         static let tabCloseSize: CGFloat = 16
-        /// The page indicator over the bottom of the reader.
-        static let pageIndicatorInset: CGFloat = 16
-        static let pageIndicatorPadding: CGFloat = 10
-        static let pageIndicatorHeight: CGFloat = 28
+        /// The paper list or the PDF in front sits on a rounded card, this far
+        /// from the window's edges and the panels beside it.
+        static let contentMargin: CGFloat = 8
+        static let contentRadius: CGFloat = 10
+        /// The reader's floating controls, over the bottom of the page.
+        static let readerBarInset: CGFloat = 16
+        static let readerBarButton: CGFloat = 28
+        /// Inside the capsule's ends and inside each button.
+        static let readerBarPadding: CGFloat = 6
+        static let readerBarSpacing: CGFloat = 2
+        /// Room for "100%" and "12 of 340" so the bar keeps its width.
+        static let readerBarZoomWidth: CGFloat = 48
         /// Reader zoom limits and step, as PDFKit scale factors.
         static let minZoom: CGFloat = 0.5
         static let maxZoom: CGFloat = 4
         static let zoomStep: CGFloat = 1.25
+        /// The floating markup toolbar over a selection or a highlight.
+        static let markupBarHeight: CGFloat = 36
+        static let markupBarPadding: CGFloat = 8
+        static let markupBarRadius: CGFloat = 8
+        /// Space between the toolbar and the text it belongs to.
+        static let markupBarOffset: CGFloat = 8
+        static let markupDotSize: CGFloat = 16
+        /// The dot's hit area, larger than the dot.
+        static let markupDotTarget: CGFloat = 24
+        static let markupRingWidth: CGFloat = 2
+        static let markupButtonHeight: CGFloat = 24
+        static let markupButtonPadding: CGFloat = 8
+        /// A sticky note's icon on the page, in PDF points.
+        static let noteIconSize: CGFloat = 20
+        static let noteEditorWidth: CGFloat = 280
+        static let noteEditorHeight: CGFloat = 120
 
         static let chipRadius: CGFloat = 6
         static let cardRadius: CGFloat = 8
@@ -89,7 +124,8 @@ enum Theme {
         static let accent = NSColor.controlAccentColor
         static let separator = NSColor.separatorColor
         static let listBackground = NSColor.controlBackgroundColor
-        static let inspectorBackground = NSColor.windowBackgroundColor
+        /// The bar above the list that names the search filter.
+        static let filterBarBackground = NSColor.windowBackgroundColor
         static let warning = NSColor.systemOrange
         static let danger = NSColor.systemRed
         /// The tag color when the user never picked one.
@@ -105,7 +141,12 @@ enum Theme {
         static let swiftUISeparator = SwiftUI.Color(nsColor: separator)
         /// The canvas around the pages in the reader.
         static let readerBackground = NSColor.underPageBackgroundColor
-        /// Tab fills: hovered, pressed, and the active tab's accent tint.
+        /// The card under the paper list and the reader, and its hairline.
+        static let content = NSColor.controlBackgroundColor
+        static let contentBorder = NSColor.separatorColor
+        /// The tab track, the raised active tab, and the other tabs' fills.
+        static let tabTrack = NSColor.labelColor.withAlphaComponent(0.05)
+        static let tabSelected = NSColor.controlBackgroundColor
         static let tabHover = NSColor.labelColor.withAlphaComponent(0.06)
         static let tabPressed = NSColor.labelColor.withAlphaComponent(0.1)
         static let swiftUIReaderBackground = SwiftUI.Color(nsColor: readerBackground)
@@ -115,6 +156,12 @@ enum Theme {
         static let swiftUIToastClose = SwiftUI.Color(nsColor: NSColor.labelColor.withAlphaComponent(0.06))
         static let swiftUIToastCloseHover = SwiftUI.Color(nsColor: NSColor.labelColor.withAlphaComponent(0.1))
         static let swiftUIToastClosePressed = SwiftUI.Color(nsColor: NSColor.labelColor.withAlphaComponent(0.16))
+        /// Hover and pressed fills of the markup toolbar's buttons.
+        static let swiftUIControlHover = SwiftUI.Color(nsColor: NSColor.labelColor.withAlphaComponent(0.06))
+        static let swiftUIControlPressed = SwiftUI.Color(nsColor: NSColor.labelColor.withAlphaComponent(0.12))
+        /// The ring around a color dot under the pointer.
+        static let swiftUIDotHoverRing = SwiftUI.Color(nsColor: NSColor.labelColor.withAlphaComponent(0.25))
+        static let swiftUIPanel = SwiftUI.Color(nsColor: .controlBackgroundColor)
         /// Keeps text on the palette's glass readable over busy windows.
         static let paletteTint = NSColor.windowBackgroundColor.withAlphaComponent(Opacity.glassTint)
     }
@@ -132,9 +179,11 @@ enum Theme {
         static let rowTitle = serif(size: 15, weight: .regular)
         /// Paper titles in tabs.
         static let tabTitle = serif(size: 13, weight: .regular)
-        static let pageIndicator = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .medium)
         /// The selected paper's title in the inspector.
         static let inspectorTitle = serif(size: 20, weight: .semibold)
+        /// The window title and subtitle in the toolbar, as the system draws them.
+        static let windowTitle = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .bold)
+        static let windowSubtitle = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         static let body = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         static let secondary = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         static let caption = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize - 1, weight: .medium)
@@ -155,6 +204,8 @@ enum Theme {
         static let swiftUIToastSubject = SwiftUI.Font.system(size: 12, weight: .regular, design: .serif)
         static let swiftUIToastAction = SwiftUI.Font.system(size: 12, weight: .semibold)
         static let swiftUIToastClose = SwiftUI.Font.system(size: 10, weight: .bold)
+        static let swiftUIReaderBarIcon = SwiftUI.Font.system(size: 13, weight: .medium)
+        static let swiftUIReaderBarLabel = SwiftUI.Font.system(size: 12, weight: .medium).monospacedDigit()
         static let swiftUIWelcomeTitle = SwiftUI.Font.system(size: 28, weight: .semibold, design: .serif)
 
         private static func serif(size: CGFloat, weight: NSFont.Weight) -> NSFont {
@@ -189,8 +240,41 @@ enum Theme {
         static let documentFade: TimeInterval = 0.15
         /// Page turns to wait before the reading position is saved.
         static let readingPositionSave: TimeInterval = 1
-        /// How long the page indicator stays after scrolling stops.
-        static let pageIndicator: TimeInterval = 1.5
+    }
+
+    /// Highlight and note colors, stored by hex in the library. Pastels that
+    /// keep black text readable under PDFKit's multiply blending.
+    enum Markup {
+        struct Swatch: Identifiable, Hashable {
+            let name: String
+            let hex: String
+            var id: String { hex }
+            var color: NSColor { NSColor(hexString: hex)! }
+        }
+
+        static let swatches = [
+            Swatch(name: "Yellow", hex: "#FFE58A"),
+            Swatch(name: "Green", hex: "#CFE8B8"),
+            Swatch(name: "Blue", hex: "#BFD9F2"),
+            Swatch(name: "Pink", hex: "#F7C6D0"),
+            Swatch(name: "Purple", hex: "#DCCBEE"),
+        ]
+        /// Notes are drawn in a stronger yellow so the icon stands out.
+        static let noteColor = "#F5C04A"
+        /// Every Paper annotation carries this `userName`, so annotations that
+        /// came inside the file can be told apart.
+        static let author = "Paper"
+        static let shadowColor = SwiftUI.Color.black.opacity(0.08)
+        static let shadowRadius: CGFloat = 8
+        static let shadowY: CGFloat = 2
+        static let pressedScale: CGFloat = 0.88
+    }
+
+    /// The raised active tab's soft shadow.
+    enum Tab {
+        static let shadowOpacity: Float = 0.08
+        static let shadowRadius: CGFloat = 2
+        static let shadowY: CGFloat = 1
     }
 
     /// The floating toasts in the window's bottom right corner.
@@ -264,5 +348,10 @@ enum Theme {
         static let attach = "paperclip"
         static let findPdf = "arrow.down.doc"
         static let reveal = "folder"
+        static let back = "chevron.left"
+        static let forward = "chevron.right"
+        static let note = "note.text"
+        static let highlight = "highlighter"
+        static let fitWidth = "arrow.left.and.right"
     }
 }

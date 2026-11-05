@@ -318,6 +318,46 @@ final class LibraryStore: ObservableObject {
         perform { try engine.setReadingPosition(id: attachmentId, page: Int32(page), zoom: zoom) }
     }
 
+    // MARK: Annotations
+
+    func annotations(attachmentId: String) -> [Annotation] {
+        do {
+            return try engine.annotations(attachmentId: attachmentId)
+        } catch {
+            report(error)
+            return []
+        }
+    }
+
+    func createAnnotation(_ new: NewAnnotation) -> Annotation? {
+        do {
+            return try engine.createAnnotation(new: new)
+        } catch {
+            report(error)
+            return nil
+        }
+    }
+
+    func updateAnnotation(id: String, patch: AnnotationPatch) -> Annotation? {
+        do {
+            return try engine.updateAnnotation(id: id, patch: patch)
+        } catch {
+            report(error)
+            return nil
+        }
+    }
+
+    /// Returns whether the annotation is gone.
+    func deleteAnnotation(id: String) -> Bool {
+        do {
+            try engine.deleteAnnotation(id: id)
+            return true
+        } catch {
+            report(error)
+            return false
+        }
+    }
+
     func revealAttachment(id: String) {
         guard let file = try? engine.attachmentFile(id: id) else { return }
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)])

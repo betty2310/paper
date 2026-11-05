@@ -1,13 +1,14 @@
 import AppKit
 
-/// The tabs in the toolbar, right of the window title: Library, then one tab
-/// per open PDF. Hidden (and zero wide) while no PDF is open.
+/// The tabs in the toolbar, right after the window title: a quiet track
+/// holding the Library icon, then one tab per open PDF, with the active tab
+/// raised out of it. Out of the toolbar while no PDF is open.
 ///
-/// Tabs are laid out by frame so they can grow in and shrink out with
-/// animation; the strip's own width follows at once, which nothing else in
-/// the toolbar notices because a flexible space comes after it. When the
-/// toolbar gives the strip less than the tabs want, the PDF tabs share what
-/// there is, down to a minimum width.
+/// The strip is flexible: it takes the room a flexible space would, up to the
+/// buttons on its right, and the PDF tabs share that room equally, like
+/// Safari's. Tabs are laid out by frame so they can grow in and shrink out
+/// with animation. Crowded tabs shrink to their icon, so the toolbar's own
+/// buttons keep their place; only past that does the toolbar overflow.
 @MainActor
 final class TabStripView: NSView {
     struct Tab: Equatable {
@@ -25,10 +26,35 @@ final class TabStripView: NSView {
     private var buttons: [String: TabButton] = [:]
 
     override var isFlipped: Bool { true }
+    override var wantsUpdateLayer: Bool { true }
 
-    override var intrinsicContentSize: NSSize {
-        NSSize(width: naturalWidth(), height: Theme.Size.tabHeight)
+    override func updateLayer() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = Theme.Color.tabTrack.cgColor
+        }
     }
+
+    /// A toolbar item whose view has a width range instead of one width is
+    /// flexible: the toolbar gives it the room between its neighbors.
+    private lazy var minimumWidthConstraint = widthAnchor.constraint(greaterThanOrEqualToConstant: 0)
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = Theme.Size.tabTrackHeight / 2
+        layer?.cornerCurve = .continuous
+        setContentHuggingPriority(.init(1), for: .horizontal)
+        NSLayoutConstraint.activate([
+            minimumWidthConstraint,
+            widthAnchor.constraint(lessThanOrEqualToConstant: Self.fillWidth),
+            heightAnchor.constraint(equalToConstant: Theme.Size.tabTrackHeight),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    private static let fillWidth: CGFloat = 10_000
 
     private var isAnimating = false
 
@@ -61,7 +87,7 @@ final class TabStripView: NSView {
             button.alphaValue = tab.id == landing ? 1 : 0
         }
         for tab in newTabs { buttons[tab.id]?.isSelected = tab.id == selectedId }
-        invalidateIntrinsicContentSize()
+        minimumWidthConstraint.constant = minimumWidth()
 
         let frames = targetFrames()
         isAnimating = true
@@ -101,36 +127,40 @@ final class TabStripView: NSView {
         buttons[id]?.isLanding = false
     }
 
-    private func naturalWidth() -> CGFloat {
+    private func minimumWidth() -> CGFloat {
         guard !tabs.isEmpty else { return 0 }
-        return tabs.map(TabButton.width(for:)).reduce(0, +) + Theme.Size.tabSpacing * CGFloat(tabs.count - 1)
+        let pdfCount = CGFloat(tabs.filter { !$0.isLibrary }.count)
+        return Theme.Size.tabTrackInset * 2 + TabButton.libraryWidth + pdfCount * (Theme.Size.tabSpacing + Theme.Size.tabMinWidth)
     }
 
-    /// Library first, then the PDFs; each as wide as its title needs, within
-    /// limits, and narrower when the strip is.
+    /// The Library icon first, then the PDFs in equal shares of the rest.
+    /// Edges are rounded from the exact shares, so the tabs end flush with
+    /// the strip and no tab is more than a point wider than another.
     private func targetFrames() -> [String: NSRect] {
-        let natural = naturalWidth()
-        let available = bounds.width
         let pdfTabs = tabs.filter { !$0.isLibrary }
-        // How much each PDF tab gives up so they all fit, never below the minimum.
-        var shrink: CGFloat = 0
-        if available > 0, natural > available, !pdfTabs.isEmpty {
-            shrink = (natural - available) / CGFloat(pdfTabs.count)
-        }
+        let inset = Theme.Size.tabTrackInset
+        let start = inset + TabButton.libraryWidth + Theme.Size.tabSpacing
+        let room = bounds.width - inset - start - Theme.Size.tabSpacing * CGFloat(max(0, pdfTabs.count - 1))
+        let share = max(Theme.Size.tabMinWidth, room / CGFloat(max(1, pdfTabs.count)))
         var frames: [String: NSRect] = [:]
-        var x: CGFloat = 0
+        var index = 0
         for tab in tabs {
-            let natural = TabButton.width(for: tab)
-            let width = tab.isLibrary ? natural : max(Theme.Size.tabMinWidth, natural - shrink)
-            frames[tab.id] = NSRect(x: x, y: 0, width: floor(width), height: Theme.Size.tabHeight)
-            x += floor(width) + Theme.Size.tabSpacing
+            if tab.isLibrary {
+                frames[tab.id] = NSRect(x: inset, y: inset, width: TabButton.libraryWidth, height: Theme.Size.tabHeight)
+                continue
+            }
+            let offset = start + CGFloat(index) * Theme.Size.tabSpacing
+            let minX = round(offset + CGFloat(index) * share)
+            let maxX = round(offset + CGFloat(index + 1) * share)
+            frames[tab.id] = NSRect(x: minX, y: inset, width: maxX - minX, height: Theme.Size.tabHeight)
+            index += 1
         }
         return frames
     }
 }
 
-/// One tab: an icon, the title, and a close button for PDF tabs. Hover,
-/// pressed, and selected states each have their own fill.
+/// One tab: an icon, the title, and a close button for PDF tabs. Hover and
+/// pressed tabs get a quiet fill; the selected tab is raised out of the track.
 @MainActor
 final class TabButton: NSView {
     let tab: TabStripView.Tab
@@ -172,16 +202,8 @@ final class TabButton: NSView {
     var titleFrame: NSRect { title.frame.offsetBy(dx: content.frame.minX, dy: content.frame.minY) }
     var titleFont: NSFont { title.font ?? Theme.Font.tabTitle }
 
-    /// The Library tab is just its icon; a PDF tab fits its title, within limits.
-    static func width(for tab: TabStripView.Tab) -> CGFloat {
-        if tab.isLibrary { return Theme.Size.tabPadding * 2 + Theme.Size.iconSize }
-        let measure = NSTextField(labelWithString: tab.title)
-        measure.font = Theme.Font.tabTitle
-        let text = ceil(measure.intrinsicContentSize.width)
-        let natural = Theme.Size.tabPadding * 2 + Theme.Size.iconSize + Theme.Size.smallGap + text
-            + Theme.Size.smallGap + Theme.Size.tabCloseSize
-        return min(max(natural, Theme.Size.tabMinWidth), Theme.Size.tabMaxWidth)
-    }
+    /// The Library tab is just its icon.
+    static let libraryWidth = Theme.Size.tabPadding * 2 + Theme.Size.iconSize
 
     init(tab: TabStripView.Tab) {
         self.tab = tab
@@ -233,14 +255,25 @@ final class TabButton: NSView {
         needsLayout = true
     }
 
+    /// Too narrow for a title: the icon sits in the middle, and the close
+    /// button takes its place while the pointer is on the tab.
+    private var isCompact: Bool { !tab.isLibrary && bounds.width < Theme.Size.tabCompactWidth }
+
     override func layout() {
         super.layout()
         content.frame = bounds
         let height = bounds.height
         let iconSize = Theme.Size.iconSize
-        icon.frame = NSRect(x: Theme.Size.tabPadding, y: (height - iconSize) / 2, width: iconSize, height: iconSize)
         let close = Theme.Size.tabCloseSize
-        closeButton.frame = NSRect(x: bounds.width - Theme.Size.tabPadding / 2 - close - 2, y: (height - close) / 2, width: close, height: close)
+        if isCompact || tab.isLibrary {
+            icon.frame = NSRect(x: round((bounds.width - iconSize) / 2), y: (height - iconSize) / 2, width: iconSize, height: iconSize)
+            closeButton.frame = NSRect(x: round((bounds.width - close) / 2), y: (height - close) / 2, width: close, height: close)
+        } else {
+            icon.frame = NSRect(x: Theme.Size.tabPadding, y: (height - iconSize) / 2, width: iconSize, height: iconSize)
+            closeButton.frame = NSRect(x: bounds.width - Theme.Size.tabPadding / 2 - close - 2, y: (height - close) / 2, width: close, height: close)
+        }
+        title.isHidden = tab.isLibrary || isCompact
+        updateState()
         let titleX = icon.frame.maxX + Theme.Size.smallGap
         let titleEnd = closeButton.frame.minX - Theme.Size.smallGap
         let titleHeight = ceil(title.intrinsicContentSize.height)
@@ -248,31 +281,40 @@ final class TabButton: NSView {
     }
 
     override func updateLayer() {
+        let raised = isSelected && !isLanding
         let fill: NSColor
         if isLanding {
             fill = .clear
+        } else if isSelected {
+            fill = selectedFill
         } else if isPressed {
             fill = Theme.Color.tabPressed
-        } else if isSelected {
-            fill = Theme.Color.accent.withAlphaComponent(Theme.Opacity.tint)
         } else if isHovered {
             fill = Theme.Color.tabHover
         } else {
             fill = .clear
         }
+        guard let layer else { return }
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer?.backgroundColor = fill.cgColor
+            layer.backgroundColor = fill.cgColor
+            layer.borderColor = Theme.Color.separator.cgColor
         }
+        layer.borderWidth = raised ? 1 / (window?.backingScaleFactor ?? 2) : 0
+        layer.shadowColor = NSColor.black.cgColor
+        layer.shadowOpacity = raised ? Theme.Tab.shadowOpacity : 0
+        layer.shadowRadius = Theme.Tab.shadowRadius
+        layer.shadowOffset = CGSize(width: 0, height: -Theme.Tab.shadowY)
     }
 
     /// The fill a landed, selected tab has, for the flight to end on.
-    var selectedFill: NSColor { Theme.Color.accent.withAlphaComponent(Theme.Opacity.tint) }
+    var selectedFill: NSColor { Theme.Color.tabSelected }
 
     private func updateState() {
         icon.contentTintColor = isSelected ? Theme.Color.accent : Theme.Color.secondaryText
         title.textColor = isSelected ? Theme.Color.text : Theme.Color.secondaryText
         closeButton.contentTintColor = Theme.Color.secondaryText
-        closeButton.isHidden = tab.isLibrary || !(isSelected || isHovered)
+        closeButton.isHidden = tab.isLibrary || !(isCompact ? isHovered : isSelected || isHovered)
+        icon.isHidden = isCompact && isHovered
         setAccessibilityValue(isSelected)
         needsDisplay = true
     }

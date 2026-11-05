@@ -4,8 +4,10 @@ import PaperEngine
 import SwiftUI
 
 /// One window per open library: a unified toolbar over a three column split
-/// view (sidebar, center, inspector). The center shows the paper list or one
-/// of the open PDFs, chosen by the tabs in the toolbar. Commands are
+/// view (sidebar, center, inspector). The toolbar, the sidebar, and the
+/// inspector share one translucent chrome; the center is a rounded card set
+/// into it, showing the paper list or one of the open PDFs, chosen by the
+/// tabs in the toolbar. Commands are
 /// selectors on the responder chain so menu items, toolbar buttons, and
 /// SwiftUI buttons share one code path.
 @MainActor
@@ -17,6 +19,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     let inspector: InspectorViewController
     private let center: TabContentViewController
     private let tabStrip = TabStripView()
+    private let titleView = TitleView()
     /// Open PDFs in tab order.
     private var readers: [ReaderViewController] = []
     /// The reader in front, or nil for the library.
@@ -34,11 +37,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         static let search = NSToolbarItem.Identifier("search")
         static let inspector = NSToolbarItem.Identifier("inspector")
         static let tabs = NSToolbarItem.Identifier("tabs")
-        static let zoom = NSToolbarItem.Identifier("zoom")
+        static let title = NSToolbarItem.Identifier("title")
 
-        /// What the toolbar shows between the tabs and the inspector button.
+        /// What the toolbar shows between the title and the inspector button
+        /// while the library is in front. The reader's controls float over
+        /// its pages instead.
         static let library = [search, sort, add]
-        static let reader = [zoom]
     }
 
     init(store: LibraryStore) {
@@ -65,7 +69,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         window.delegate = self
         window.minSize = NSSize(width: Theme.Size.windowMinWidth, height: Theme.Size.windowMinHeight)
         window.toolbarStyle = .unified
-        window.titlebarSeparatorStyle = .automatic
+        // The toolbar draws the title itself (`TitleView`), so the tabs can
+        // sit right after it and take the rest of the row. Its background is
+        // the window's chrome, the same as the sidebar's.
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
         window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
 
@@ -178,6 +187,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         guard let window else { return }
         window.title = scopeTitle(scope)
         window.subtitle = count == 1 ? "1 paper" : "\(count) papers"
+        titleView.set(title: window.title, subtitle: window.subtitle)
     }
 
     private func scopeTitle(_ scope: Scope) -> String {
@@ -265,8 +275,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             return activeReader?.canZoomIn ?? false
         case #selector(zoomOut(_:)):
             return activeReader?.canZoomOut ?? false
-        case #selector(zoomToFitWidth(_:)):
+        case #selector(zoomToFitWidth(_:)), #selector(addNote(_:)):
             return activeReader != nil
+        case #selector(navigateBack(_:)):
+            return activeReader?.canGoBack ?? false
+        case #selector(navigateForward(_:)):
+            return activeReader?.canGoForward ?? false
+        case #selector(highlightSelection(_:)):
+            return activeReader?.canHighlight ?? false
         case #selector(showNextTab(_:)), #selector(showPreviousTab(_:)):
             return !readers.isEmpty
         case #selector(findPdf(_:)):
@@ -364,7 +380,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         activeReader = nil
         center.show(list, animated: true)
         updateTabs()
-        setToolbarItems(ToolbarID.library, replacing: ToolbarID.reader)
+        showLibraryToolbarItems(true)
         window?.makeFirstResponder(list.tableView)
     }
 
@@ -374,7 +390,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         activeReader = reader
         center.show(reader, animated: true)
         updateTabs(landing: landing ? reader.itemId : nil)
-        setToolbarItems(ToolbarID.reader, replacing: ToolbarID.library)
+        showLibraryToolbarItems(false)
         // The inspector follows the paper in front, when the list shows it.
         if store.selectedItemIds != [reader.itemId], store.items.contains(where: { $0.id == reader.itemId }) {
             store.selectedItemIds = [reader.itemId]
@@ -403,7 +419,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private func showLibraryAfterClosing() {
         center.show(list, animated: true)
         updateTabs()
-        setToolbarItems(ToolbarID.library, replacing: ToolbarID.reader)
+        showLibraryToolbarItems(true)
         window?.makeFirstResponder(list.tableView)
     }
 
@@ -421,8 +437,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         guard let toolbar = window?.toolbar else { return }
         let index = toolbar.items.firstIndex { $0.itemIdentifier == ToolbarID.tabs }
         if !tabs.isEmpty, index == nil,
-           let separator = toolbar.items.firstIndex(where: { $0.itemIdentifier == .sidebarTrackingSeparator }) {
-            toolbar.insertItem(withItemIdentifier: ToolbarID.tabs, at: separator + 1)
+           let title = toolbar.items.firstIndex(where: { $0.itemIdentifier == ToolbarID.title }) {
+            // The strip takes the flexible space's place and all of its room.
+            if toolbar.items.indices.contains(title + 1), toolbar.items[title + 1].itemIdentifier == .flexibleSpace {
+                toolbar.removeItem(at: title + 1)
+            }
+            toolbar.insertItem(withItemIdentifier: ToolbarID.tabs, at: title + 1)
+            // The strip needs its width before the first tabs grow into it.
+            window?.layoutIfNeeded()
         }
         tabStrip.update(tabs: tabs, selectedId: activeReader?.itemId ?? TabStripView.Tab.libraryId, landing: landing)
         if tabs.isEmpty {
@@ -432,6 +454,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
                       let index = toolbar.items.firstIndex(where: { $0.itemIdentifier == ToolbarID.tabs })
                 else { return }
                 toolbar.removeItem(at: index)
+                toolbar.insertItem(withItemIdentifier: .flexibleSpace, at: index)
             }
         }
     }
@@ -456,9 +479,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     @objc func zoomOut(_ sender: Any?) { activeReader?.zoomOut() }
     @objc func zoomToFitWidth(_ sender: Any?) { activeReader?.fitWidth() }
 
-    @objc private func zoomClicked(_ sender: NSToolbarItemGroup) {
-        if sender.selectedIndex == 0 { zoomOut(sender) } else { zoomIn(sender) }
-    }
+    /// Back to where the reader was before following a link (⌘[).
+    @objc func navigateBack(_ sender: Any?) { activeReader?.goBack() }
+    @objc func navigateForward(_ sender: Any?) { activeReader?.goForward() }
+
+    @objc func highlightSelection(_ sender: Any?) { activeReader?.highlightSelection() }
+    @objc func addNote(_ sender: Any?) { activeReader?.startPlacingNote() }
 
     // MARK: PDF commands
 
@@ -477,28 +503,30 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         store.revealAttachment(id: attachment.id)
     }
 
-    /// Swaps the library's toolbar buttons for the reader's or back.
-    private func setToolbarItems(_ wanted: [NSToolbarItem.Identifier], replacing unwanted: [NSToolbarItem.Identifier]) {
-        guard let toolbar = window?.toolbar,
-              let start = toolbar.items.firstIndex(where: { unwanted.contains($0.itemIdentifier) })
-        else { return }
-        for index in toolbar.items.indices.reversed() where unwanted.contains(toolbar.items[index].itemIdentifier) {
-            toolbar.removeItem(at: index)
-        }
-        for (offset, identifier) in wanted.enumerated() {
-            toolbar.insertItem(withItemIdentifier: identifier, at: start + offset)
+    /// The library's toolbar buttons show only while the library is in front.
+    private func showLibraryToolbarItems(_ show: Bool) {
+        guard let toolbar = window?.toolbar else { return }
+        let shown = toolbar.items.contains { ToolbarID.library.contains($0.itemIdentifier) }
+        if show, !shown, let start = toolbar.items.firstIndex(where: { $0.itemIdentifier == .inspectorTrackingSeparator }) {
+            for (offset, identifier) in ToolbarID.library.enumerated() {
+                toolbar.insertItem(withItemIdentifier: identifier, at: start + offset)
+            }
+        } else if !show {
+            for index in toolbar.items.indices.reversed() where ToolbarID.library.contains(toolbar.items[index].itemIdentifier) {
+                toolbar.removeItem(at: index)
+            }
         }
     }
 
     // MARK: Toolbar
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace] + ToolbarID.library
+        [.toggleSidebar, .sidebarTrackingSeparator, ToolbarID.title, .flexibleSpace] + ToolbarID.library
             + [.inspectorTrackingSeparator, .flexibleSpace, ToolbarID.inspector]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        toolbarDefaultItemIdentifiers(toolbar) + ToolbarID.reader + [ToolbarID.tabs]
+        toolbarDefaultItemIdentifiers(toolbar) + [ToolbarID.tabs]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
@@ -530,6 +558,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             item.action = #selector(showSearch(_:))
             item.isBordered = true
             return item
+        case ToolbarID.title:
+            let item = NSToolbarItem(itemIdentifier: identifier)
+            item.label = "Title"
+            item.view = titleView
+            item.isBordered = false
+            item.visibilityPriority = .high
+            return item
         case ToolbarID.tabs:
             let item = NSToolbarItem(itemIdentifier: identifier)
             item.label = "Tabs"
@@ -537,25 +572,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             item.isBordered = false
             item.visibilityPriority = .high
             return item
-        case ToolbarID.zoom:
-            let group = NSToolbarItemGroup(
-                itemIdentifier: identifier,
-                images: [
-                    NSImage(systemSymbolName: Theme.Symbol.zoomOut, accessibilityDescription: "Zoom Out")!,
-                    NSImage(systemSymbolName: Theme.Symbol.zoomIn, accessibilityDescription: "Zoom In")!,
-                ],
-                selectionMode: .momentary,
-                labels: ["Zoom Out", "Zoom In"],
-                target: self,
-                action: #selector(zoomClicked(_:))
-            )
-            group.label = "Zoom"
-            group.toolTip = "Zoom out (⌘−) or in (⌘+)"
-            return group
         case ToolbarID.inspector:
             let item = NSToolbarItem(itemIdentifier: identifier)
             item.label = "Inspector"
-            item.toolTip = "Show or hide the inspector (⌥⌘I)"
+            item.toolTip = "Show or hide the inspector (⇧⌘B)"
             item.image = NSImage(systemSymbolName: Theme.Symbol.inspector, accessibilityDescription: "Inspector")
             item.target = self
             item.action = #selector(toggleInspector(_:))
@@ -605,12 +625,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 }
 
-/// The center of the window: the paper list or one reader, cross faded when
-/// the tab changes. Readers stay alive while their tab is open, so switching
-/// back keeps the page and zoom.
+/// The center of the window: the paper list or one reader on a rounded card,
+/// cross faded when the tab changes. The card starts under the toolbar and
+/// keeps a margin from the window's edges and the panels. Readers stay alive
+/// while their tab is open, so switching back keeps the page and zoom.
 @MainActor
 final class TabContentViewController: NSViewController {
     private(set) var current: NSViewController
+    private let card = ContentCardView()
 
     init(showing initial: NSViewController) {
         current = initial
@@ -623,7 +645,15 @@ final class TabContentViewController: NSViewController {
 
     override func loadView() {
         let root = NSView()
-        root.wantsLayer = true
+        card.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(card)
+        let margin = Theme.Size.contentMargin
+        NSLayoutConstraint.activate([
+            card.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            card.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: margin),
+            card.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -margin),
+            card.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -margin),
+        ])
         view = root
         pin(current.view)
     }
@@ -636,7 +666,7 @@ final class TabContentViewController: NSViewController {
             fade.type = .fade
             fade.duration = Theme.Duration.tabSwitch
             fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            view.layer?.add(fade, forKey: "tabSwitch")
+            card.layer?.add(fade, forKey: "tabSwitch")
         }
         current.view.removeFromSuperview()
         current = controller
@@ -652,29 +682,127 @@ final class TabContentViewController: NSViewController {
 
     private func pin(_ subview: NSView) {
         subview.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(subview)
+        card.addSubview(subview)
         NSLayoutConstraint.activate([
-            subview.topAnchor.constraint(equalTo: view.topAnchor),
-            subview.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            subview.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            subview.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            subview.topAnchor.constraint(equalTo: card.topAnchor),
+            subview.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            subview.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            subview.bottomAnchor.constraint(equalTo: card.bottomAnchor),
         ])
     }
 }
 
-/// The window's split view. The controller inserts column views as they
-/// load, above anything added before; the toasts move back to the top.
+/// A rounded card with a one pixel border that clips what it holds.
+@MainActor
+final class ContentCardView: NSView {
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = Theme.Size.contentRadius
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        guard let layer else { return }
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer.backgroundColor = Theme.Color.content.cgColor
+            layer.borderColor = Theme.Color.contentBorder.cgColor
+        }
+        layer.borderWidth = 1 / (window?.backingScaleFactor ?? 2)
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        needsDisplay = true
+    }
+}
+
+/// The window's split view, over one translucent chrome that shows wherever
+/// the columns leave room. Its dividers are invisible: the card's margin
+/// separates the columns. The controller inserts column views as they load,
+/// above anything added before; the chrome moves back to the bottom and the
+/// toasts to the top.
 final class ToastSplitView: NSSplitView {
     weak var toasts: NSView?
+    private let chrome = ChromeView()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        chrome.material = .sidebar
+        chrome.blendingMode = .behindWindow
+        chrome.state = .followsWindowActiveState
+        chrome.autoresizingMask = [.width, .height]
+        addSubview(chrome, positioned: .below, relativeTo: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var dividerColor: NSColor { .clear }
 
     override func layout() {
         super.layout()
-        guard let toasts, subviews.last !== toasts else { return }
+        chrome.frame = bounds
+        guard subviews.first !== chrome || (toasts != nil && subviews.last !== toasts) else { return }
         // Reorders without removing, so the toasts keep their constraints.
         sortSubviews({ first, second, _ in
-            let firstOnTop = first is ToastHostingView, secondOnTop = second is ToastHostingView
-            if firstOnTop == secondOnTop { return .orderedSame }
-            return firstOnTop ? .orderedDescending : .orderedAscending
+            func rank(_ view: NSView) -> Int { view is ToastHostingView ? 2 : view is ChromeView ? 0 : 1 }
+            let (a, b) = (rank(first), rank(second))
+            return a == b ? .orderedSame : a < b ? .orderedAscending : .orderedDescending
         }, context: nil)
+    }
+
+    private final class ChromeView: NSVisualEffectView {}
+}
+
+/// The window's title and subtitle, drawn as the toolbar's first item the
+/// way the system draws them, because the system title would keep the tab
+/// strip from starting right after it.
+@MainActor
+final class TitleView: NSView {
+    private let title = NSTextField(labelWithString: "")
+    private let subtitle = NSTextField(labelWithString: "")
+
+    init() {
+        super.init(frame: .zero)
+        title.font = Theme.Font.windowTitle
+        title.textColor = Theme.Color.text
+        subtitle.font = Theme.Font.windowSubtitle
+        subtitle.textColor = Theme.Color.secondaryText
+        for label in [title, subtitle] {
+            label.lineBreakMode = .byTruncatingTail
+            label.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(label)
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Theme.Size.windowTitleInset),
+                label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Theme.Size.gap),
+            ])
+        }
+        // As narrow as the longer line and a gap, so the tabs start right after it.
+        let hug = widthAnchor.constraint(equalToConstant: 0)
+        hug.priority = .defaultLow
+        NSLayoutConstraint.activate([
+            hug,
+            heightAnchor.constraint(equalToConstant: Theme.Size.windowTitleHeight),
+            title.firstBaselineAnchor.constraint(equalTo: topAnchor, constant: Theme.Size.windowTitleBaseline),
+            subtitle.firstBaselineAnchor.constraint(equalTo: title.firstBaselineAnchor, constant: Theme.Size.windowSubtitleBaseline),
+        ])
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    func set(title text: String, subtitle detail: String) {
+        title.stringValue = text
+        subtitle.stringValue = detail
+        setAccessibilityLabel("\(text), \(detail)")
     }
 }

@@ -11,20 +11,21 @@ Decided 2026-10-27. The reference mockups are `docs/design/library.png` and `doc
 
 ## Layout
 
-The window is a three pane layout under a tab bar.
+The window is a three pane layout under a unified toolbar, in the style of Rex by Superlogical: the toolbar, the sidebar, the detail panel, and the gaps between them are one translucent chrome (the system's sidebar material), and the center sits on a rounded card set into it.
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ ● ● ●  Paper │ Library │ <PDF title> ✕ │ <PDF title> ✕ │ +                   │ 40 px tab bar
-├──────────────┬───────────────────────────────────────────┬───────────────────┤
-│ sidebar      │ center                                     │ detail panel      │
-│ 240 px       │ fills                                      │ 400 px, hideable  │
-│ min 200      │                                            │ min 320           │
-│              │                                            │                   │
-└──────────────┴───────────────────────────────────────────┴───────────────────┘
+│ ● ● ●  ▯ │ All Papers  (▥ │ <PDF title> ✕ │ <PDF title>)            ▯ │ toolbar
+│          │ 14 papers                                                      │
+│ sidebar  │ ╭────────────────────────────────────────╮  detail panel       │
+│ on the   │ │ center card: paper list or PDF         │  on the chrome,     │
+│ chrome   │ │ 10 px radius, 1 physical px border     │  hideable           │
+│          │ │                 ( ‹ › │ 3 of 12 │ − 97% + ⟷ │ 🖍 🗒 )       │                     │
+│          │ ╰────────────────────────────────────────╯                     │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The tab bar spans the full width. The "Paper" label and the macOS traffic lights sit at the left of the tab bar on macOS, which hides the standard window title and uses full size content. The later Windows and Linux apps also hold their window controls at the right of the tab bar. The sidebar is shared by all tabs and can be collapsed with ⌘1. The detail panel belongs to the active tab and can be collapsed with ⌘3. Both dividers are draggable with the sizes remembered per library.
+The toolbar draws no background or separator of its own. It holds the sidebar toggle, the current list's name with its paper count under it, and, while any PDF is open, the tabs: a quiet track as tall as the two title lines that holds the Library icon and one tab per PDF, with the active tab raised out of it in white with a hairline border and a soft shadow. Library and PDF tabs use the same icon size. The tabs share the toolbar's free width equally and shrink to their icon when crowded. The center card starts under the toolbar and keeps an 8 px margin from the window's edges and the panels; the split view dividers are invisible. The sidebar is shared by all tabs and can be collapsed with ⌘B. The detail panel belongs to the active tab and can be collapsed with ⌘⇧B. Both dividers are draggable with the sizes remembered per library.
 
 ### Sidebar
 
@@ -55,7 +56,7 @@ The reader fills the center and the detail panel area of its tab.
 └───────┴──────────────────────────────────────────────────────┴───────────────┘
 ```
 
-The toolbar has the serif title with the author line under it at the left, the page field, zoom stepper, and "Fit width" toggle centered, and search, outline, and the "Annotations" toggle at the right. The thumbnail strip shows page images at 88 px wide with the page number under each and a 2 px accent outline on the current page; it can be hidden with ⌘2. The canvas background is warm gray, pages are white with a hairline border and no shadow, continuous vertical scrolling, zoom from 50% to 400% around the cursor with ⌘ and scroll or pinch, and ⌘0 for fit width.
+The reader has no toolbar row of its own: its controls float in one capsule centered 16 px above the bottom of the page, styled like the toasts (an opaque capsule with a hairline border and a soft shadow). From left to right it holds Back and Forward after following a link (Back shows the page it returns to, such as "‹ p. 3"), the current page "3 of 12", zoom out, the zoom percentage, zoom in, and the "Fit width" toggle, then Highlight selection and Add note. While a note is being placed the page label reads "Click where the note goes" and the note button stays tinted. The thumbnail strip shows page images at 88 px wide with the page number under each and a 2 px accent outline on the current page; it can be hidden with ⌘2. The canvas background is warm gray, pages are white with a hairline border and no shadow, continuous vertical scrolling, zoom from 50% to 400% around the cursor with ⌘ and scroll or pinch, and ⌘0 for fit width.
 
 Selection and markup: dragging over text draws the selection in a translucent accent blue. Releasing shows a floating toolbar 8 px above the selection with five color dots (yellow, green, blue, pink, purple), highlight, underline, strikethrough, note, and a "Copy" text button. Clicking a color applies the last used markup kind in that color. Highlights are drawn with multiply blending so text stays sharp. A sticky note shows a 20 px icon in the margin and opens a small popover for the comment. The right panel tabs are ANNOTATIONS (cards in page order with a 3 px color bar, the quoted text, an italic comment, and the page number; clicking scrolls to it, and a card's comment can be edited inline), OUTLINE (the PDF outline tree), and NOTES (the Markdown note editor with a preview toggle). The "Export PDF with annotations" button sits at the bottom of the panel. Text search opens a bar under the toolbar with the match count and up and down buttons and highlights matches on the page.
 
@@ -114,11 +115,13 @@ Every interactive element has hover (background 3% darker), pressed (6% darker),
 | Open selected paper | Enter | Enter |
 | Close tab | ⌘W | Ctrl+W |
 | Next and previous tab | ⌘⇧] and ⌘⇧[ | Ctrl+Tab and Ctrl+Shift+Tab |
-| Toggle sidebar, thumbnails, detail panel | ⌘1, ⌘2, ⌘3 | Ctrl+1, 2, 3 |
+| Toggle sidebar, detail panel | ⌘B, ⌘⇧B | Ctrl+B, Ctrl+Shift+B |
+| Toggle thumbnails | ⌘2 | Ctrl+2 |
 | Find in document | ⌘F | Ctrl+F |
 | Highlight, underline, strikethrough selection | ⌘⇧H, ⌘⇧U, ⌘⇧S | Ctrl+Shift+H, U, S |
-| Add sticky note | ⌘⇧N | Ctrl+Shift+N |
-| Copy BibTeX, copy citation | ⌘⇧B, ⌘⇧C | Ctrl+Shift+B, C |
+| Add sticky note (then click where it goes) | ⌃⌘N, because ⌘⇧N is New Collection | Ctrl+Shift+N |
+| Back and forward after following a link | ⌘[ and ⌘] | Alt+Left and Alt+Right |
+| Copy BibTeX, copy citation | ⌥⌘B, ⌘⇧C | Ctrl+Alt+B, Ctrl+Shift+C |
 | Zoom in, out, fit width | ⌘+, ⌘−, ⌘0 | Ctrl++, Ctrl+−, Ctrl+0 |
 
 ## Implementation notes for the macOS app

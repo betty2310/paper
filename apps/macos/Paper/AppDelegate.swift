@@ -289,6 +289,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         paperMenu.addItem(withTitle: "Open Publisher Page", action: #selector(PaperListViewController.openPublisherPage(_:)), keyEquivalent: "")
         paperMenu.addItem(withTitle: "Retry Lookup", action: #selector(PaperListViewController.retryLookup(_:)), keyEquivalent: "")
         paperMenu.addItem(.separator())
+        let highlightItem = paperMenu.addItem(withTitle: "Highlight Selection", action: #selector(MainWindowController.highlightSelection(_:)), keyEquivalent: "h")
+        highlightItem.keyEquivalentModifierMask = [.command, .shift]
+        // ⇧⌘N is New Collection, so notes take Preview's ⌃⌘N.
+        let noteItem = paperMenu.addItem(withTitle: "Add Note", action: #selector(MainWindowController.addNote(_:)), keyEquivalent: "n")
+        noteItem.keyEquivalentModifierMask = [.command, .control]
+        paperMenu.addItem(.separator())
         let sortItem = paperMenu.addItem(withTitle: "Sort By", action: nil, keyEquivalent: "")
         let sortMenu = NSMenu(title: "Sort By")
         for column in SortColumn.allCases {
@@ -298,14 +304,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         sortItem.submenu = sortMenu
 
         let viewMenu = NSMenu(title: "View")
-        let sidebarItem = viewMenu.addItem(withTitle: "Hide Sidebar", action: #selector(MainWindowController.toggleSidebar(_:)), keyEquivalent: "s")
-        sidebarItem.keyEquivalentModifierMask = [.command, .control]
-        let inspectorItem = viewMenu.addItem(withTitle: "Hide Inspector", action: #selector(MainWindowController.toggleInspector(_:)), keyEquivalent: "i")
-        inspectorItem.keyEquivalentModifierMask = [.command, .option]
+        let sidebarItem = viewMenu.addItem(withTitle: "Hide Sidebar", action: #selector(MainWindowController.toggleSidebar(_:)), keyEquivalent: "b")
+        sidebarItem.keyEquivalentModifierMask = [.command]
+        let inspectorItem = viewMenu.addItem(withTitle: "Hide Inspector", action: #selector(MainWindowController.toggleInspector(_:)), keyEquivalent: "b")
+        inspectorItem.keyEquivalentModifierMask = [.command, .shift]
         viewMenu.addItem(.separator())
         viewMenu.addItem(withTitle: "Zoom In", action: #selector(MainWindowController.zoomIn(_:)), keyEquivalent: "+")
         viewMenu.addItem(withTitle: "Zoom Out", action: #selector(MainWindowController.zoomOut(_:)), keyEquivalent: "-")
         viewMenu.addItem(withTitle: "Fit Width", action: #selector(MainWindowController.zoomToFitWidth(_:)), keyEquivalent: "0")
+        viewMenu.addItem(.separator())
+        viewMenu.addItem(withTitle: "Back", action: #selector(MainWindowController.navigateBack(_:)), keyEquivalent: "[")
+        viewMenu.addItem(withTitle: "Forward", action: #selector(MainWindowController.navigateForward(_:)), keyEquivalent: "]")
         viewMenu.addItem(.separator())
         let fullScreen = viewMenu.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         fullScreen.keyEquivalentModifierMask = [.command, .control]

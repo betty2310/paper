@@ -524,7 +524,7 @@ struct FilterBar: View {
             .padding(.horizontal, Theme.Size.padding)
             .frame(height: Theme.Size.filterBarHeight)
             .frame(maxWidth: .infinity)
-            .background(Color(nsColor: Theme.Color.inspectorBackground))
+            .background(Color(nsColor: Theme.Color.filterBarBackground))
             .overlay(alignment: .bottom) { Divider() }
         }
     }
