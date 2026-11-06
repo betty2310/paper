@@ -5,7 +5,7 @@ import SwiftUI
 
 /// One window per open library: a unified toolbar over a three column split
 /// view (sidebar, center, inspector). The toolbar, the sidebar, and the
-/// inspector share one translucent chrome; the center is a card set into it,
+/// inspector share one translucent chrome, and the center sits on it too,
 /// showing the paper list or one of the open PDFs, chosen by the tabs in the
 /// toolbar. While a PDF is in front, the sidebar shows its table of contents
 /// instead of the library's lists. Commands are
@@ -709,14 +709,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 }
 
-/// The center of the window: the paper list or one reader on a card, cross
-/// faded when the tab changes. The card starts under the toolbar and reaches
-/// the window's bottom edge and the panels beside it. Readers stay alive
+/// The center of the window: the paper list or one reader, cross faded when
+/// the tab changes. It sits on the window's chrome with no card of its own,
+/// from under the toolbar to the window's bottom edge and the panels beside it. Readers stay alive
 /// while their tab is open, so switching back keeps the page and zoom.
 @MainActor
 final class TabContentViewController: NSViewController {
     private(set) var current: NSViewController
-    private let card = ContentCardView()
+    /// Holds the column in front; its layer runs the tab switch fade.
+    private let content = NSView()
 
     init(showing initial: NSViewController) {
         current = initial
@@ -729,13 +730,14 @@ final class TabContentViewController: NSViewController {
 
     override func loadView() {
         let root = NSView()
-        card.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(card)
+        content.wantsLayer = true
+        content.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(content)
         NSLayoutConstraint.activate([
-            card.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
-            card.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            card.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            card.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            content.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            content.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         view = root
         pin(current.view)
@@ -749,7 +751,7 @@ final class TabContentViewController: NSViewController {
             fade.type = .fade
             fade.duration = Theme.Duration.tabSwitch
             fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            card.layer?.add(fade, forKey: "tabSwitch")
+            content.layer?.add(fade, forKey: "tabSwitch")
         }
         current.view.removeFromSuperview()
         current = controller
@@ -765,12 +767,12 @@ final class TabContentViewController: NSViewController {
 
     private func pin(_ subview: NSView) {
         subview.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(subview)
+        content.addSubview(subview)
         NSLayoutConstraint.activate([
-            subview.topAnchor.constraint(equalTo: card.topAnchor),
-            subview.leadingAnchor.constraint(equalTo: card.leadingAnchor),
-            subview.trailingAnchor.constraint(equalTo: card.trailingAnchor),
-            subview.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+            subview.topAnchor.constraint(equalTo: content.topAnchor),
+            subview.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            subview.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            subview.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
     }
 }
@@ -878,43 +880,9 @@ final class SidebarContentViewController: NSViewController {
     }
 }
 
-/// A card with a one pixel border that clips what it holds. Only its top
-/// corners are rounded: the bottom ones sit in the window's own corners.
-@MainActor
-final class ContentCardView: NSView {
-    init() {
-        super.init(frame: .zero)
-        wantsLayer = true
-        layer?.cornerRadius = Theme.Size.contentRadius
-        layer?.cornerCurve = .continuous
-        // A view's layer is not flipped, so the top is at max y.
-        layer?.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
-        layer?.masksToBounds = true
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    override var wantsUpdateLayer: Bool { true }
-
-    override func updateLayer() {
-        guard let layer else { return }
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer.backgroundColor = Theme.Color.content.cgColor
-            layer.borderColor = Theme.Color.contentBorder.cgColor
-        }
-        layer.borderWidth = 1 / (window?.backingScaleFactor ?? 2)
-    }
-
-    override func viewDidChangeBackingProperties() {
-        super.viewDidChangeBackingProperties()
-        needsDisplay = true
-    }
-}
-
 /// The window's split view, over one translucent chrome that shows wherever
-/// the columns leave room. Its dividers are invisible: the card's border
-/// separates the columns. The controller inserts column views as they load,
+/// the columns leave room. Its dividers are invisible: the columns sit on
+/// the one chrome. The controller inserts column views as they load,
 /// above anything added before; the chrome moves back to the bottom and the
 /// toasts to the top.
 final class ToastSplitView: NSSplitView {

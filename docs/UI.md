@@ -11,21 +11,20 @@ Decided 2026-10-27. The reference mockups are `docs/design/library.png` and `doc
 
 ## Layout
 
-The window is a three pane layout under a unified toolbar, in the style of Rex by Superlogical: the toolbar, the sidebar, the detail panel, and the gaps between them are one translucent chrome (the system's sidebar material), and the center sits on a rounded card set into it.
+The window is a three pane layout under a unified toolbar, in the style of Rex by Superlogical: the toolbar, the sidebar, the detail panel, and the gaps between them are one translucent chrome (the system's sidebar material), and the center sits on that chrome too, with no card of its own.
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ ● ● ●  ▯ │ All Papers  (▥ │ <PDF title> ✕ │ <PDF title>)            ▯ │ toolbar
 │          │ 14 papers                                                      │
-│ sidebar  │ ╭────────────────────────────────────────╮  detail panel       │
-│ on the   │ │ center card: paper list or PDF         │  on the chrome,     │
-│ chrome   │ │ 10 px radius, 1 physical px border     │  hideable           │
-│          │ │                 ( ‹ › │ 3 of 12 │ − 97% + ⟷ │ 🖍 🗒 )       │                     │
-│          │ ╰────────────────────────────────────────╯                     │
+│ sidebar  │                                             detail panel       │
+│ on the   │   center: paper list or PDF, on the chrome  on the chrome,     │
+│ chrome   │                                             hideable           │
+│          │                                                                │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The toolbar draws no background or separator of its own. It holds the sidebar toggle, the current list's name with its paper count under it, and, while any PDF is open, the tabs: a quiet track as tall as the two title lines that holds the Library icon and one tab per PDF, with the active tab raised out of it in white with a hairline border and a soft shadow. Library and PDF tabs use the same icon size. The tabs share the toolbar's free width equally and shrink to their icon when crowded. The center card starts under the toolbar and reaches the window's bottom edge and the panels on either side with no margin; only its top corners are rounded, and its hairline border separates it from the chrome, so the split view dividers are invisible. The sidebar is shared by all tabs and can be collapsed with ⌘B. While a PDF tab is in front, the sidebar shows that PDF's table of contents instead of the library's lists: a CONTENTS group with the outline tree (top level entries expanded) and each entry's page number at the trailing edge. Going from the library to a PDF, the lists slide out to the leading side as the contents slide in from the trailing side (24 px, cross faded, the tab switch duration), and back the other way; between two PDFs the contents cross fade. Clicking an entry goes there, and Back returns, as after a link. The entry for the part at the top of the view stays selected while scrolling. A PDF without an outline shows "This PDF has no table of contents." in muted text. The detail panel belongs to the active tab and can be collapsed with ⌘⇧B. Both dividers are draggable. The window frame, both panel widths, and whether each panel is hidden are remembered across launches, so the window opens the way it was left; hiding or showing a panel is saved at once.
+The toolbar draws no background or separator of its own. It holds the sidebar toggle, the current list's name with its paper count under it, and, while any PDF is open, the tabs: a quiet track as tall as the two title lines that holds the Library icon and one tab per PDF, with the active tab raised out of it in white with a hairline border and a soft shadow. Library and PDF tabs use the same icon size. The tabs share the toolbar's free width equally and shrink to their icon when crowded. The center starts under the toolbar and reaches the window's bottom edge and the panels on either side with no margin. It has no card, fill, border, or rounded corners: the paper list sits on the chrome like the sidebar, and the reader's page canvas fills the center. The split view dividers are invisible. The sidebar is shared by all tabs and can be collapsed with ⌘B. While a PDF tab is in front, the sidebar shows that PDF's table of contents instead of the library's lists: a CONTENTS group with the outline tree (top level entries expanded) and each entry's page number at the trailing edge. Going from the library to a PDF, the lists slide out to the leading side as the contents slide in from the trailing side (24 px, cross faded, the tab switch duration), and back the other way; between two PDFs the contents cross fade. Clicking an entry goes there, and Back returns, as after a link. The entry for the part at the top of the view stays selected while scrolling. A PDF without an outline shows "This PDF has no table of contents." in muted text. The detail panel belongs to the active tab and can be collapsed with ⌘⇧B. Both dividers are draggable. The window frame, both panel widths, and whether each panel is hidden are remembered across launches, so the window opens the way it was left; hiding or showing a panel is saved at once.
 
 ### Sidebar
 

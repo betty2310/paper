@@ -64,7 +64,8 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
         tableView.allowsMultipleSelection = true
         tableView.allowsEmptySelection = true
         tableView.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
-        tableView.backgroundColor = Theme.Color.listBackground
+        // The list sits on the window's chrome, like the sidebar.
+        tableView.backgroundColor = .clear
         tableView.dataSource = self
         tableView.delegate = self
         tableView.menu = makeContextMenu()
@@ -76,6 +77,7 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
         scrollView.automaticallyAdjustsContentInsets = true
 
         emptyStateHost = NSHostingView(rootView: EmptyStateView(store: store))

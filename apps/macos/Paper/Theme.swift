@@ -82,9 +82,6 @@ enum Theme {
         static let tabPadding: CGFloat = 10
         static let tabSpacing: CGFloat = 2
         static let tabCloseSize: CGFloat = 16
-        /// The paper list or the PDF in front sits on a card whose top
-        /// corners are rounded.
-        static let contentRadius: CGFloat = 10
         /// How far the sidebar's lists and a PDF's table of contents travel
         /// as one replaces the other.
         static let sidebarSlide: CGFloat = 24
@@ -156,9 +153,6 @@ enum Theme {
         static let swiftUISeparator = SwiftUI.Color(nsColor: separator)
         /// The canvas around the pages in the reader.
         static let readerBackground = NSColor.underPageBackgroundColor
-        /// The card under the paper list and the reader, and its hairline.
-        static let content = NSColor.controlBackgroundColor
-        static let contentBorder = NSColor.separatorColor
         /// The tab track, the raised active tab, and the other tabs' fills.
         static let tabTrack = NSColor.labelColor.withAlphaComponent(0.05)
         static let tabSelected = NSColor.controlBackgroundColor
