@@ -318,6 +318,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         sidebarItem.keyEquivalentModifierMask = [.command]
         let inspectorItem = viewMenu.addItem(withTitle: "Hide Inspector", action: #selector(MainWindowController.toggleInspector(_:)), keyEquivalent: "b")
         inspectorItem.keyEquivalentModifierMask = [.command, .shift]
+        viewMenu.addItem(withTitle: "Show Pages", action: #selector(MainWindowController.togglePages(_:)), keyEquivalent: "2")
         viewMenu.addItem(.separator())
         viewMenu.addItem(withTitle: "Zoom In", action: #selector(MainWindowController.zoomIn(_:)), keyEquivalent: "+")
         viewMenu.addItem(withTitle: "Zoom Out", action: #selector(MainWindowController.zoomOut(_:)), keyEquivalent: "-")

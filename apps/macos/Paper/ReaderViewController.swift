@@ -23,8 +23,8 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
     let attachmentId: String
     /// The paper's title, shown in the tab.
     let paperTitle: String
-    /// The table of contents, shown in the sidebar while this tab is in front.
-    let outline = ReaderOutlineViewController()
+    /// The table of contents and the pages, shown in the sidebar while this tab is in front.
+    let sidebar = ReaderSidebarViewController()
 
     private let file: AttachmentFile
     private let pdfView = ReaderPDFView()
@@ -117,7 +117,11 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         findModel.next = { [weak self] in self?.findNext() }
         findModel.previous = { [weak self] in self?.findPrevious() }
         findModel.close = { [weak self] in self?.closeFind() }
-        outline.onSelect = { [weak self] destination in self?.go(to: destination) }
+        sidebar.outline.onSelect = { [weak self] destination in self?.go(to: destination) }
+        sidebar.pages.onSelect = { [weak self] index in
+            guard let page = self?.pdfView.document?.page(at: index) else { return }
+            self?.go(to: PDFDestination(page: page, at: NSPoint(x: 0, y: kPDFDestinationUnspecifiedValue)))
+        }
         barModel.addNote = { [weak self] in
             guard let self else { return }
             if isPlacingNote { stopPlacingNote() } else { startPlacingNote() }
@@ -178,7 +182,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
             return
         }
         pdfView.document = document
-        outline.load(document)
+        sidebar.load(document)
         for annotation in store.annotations(attachmentId: attachmentId) {
             draw(annotation)
         }
@@ -267,10 +271,10 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         scheduleSave()
     }
 
-    /// Keeps the table of contents on the part at the top of the view.
+    /// Keeps the table of contents and the pages on the part at the top of the view.
     private func updateOutline() {
         guard let document = pdfView.document, let here = pdfView.currentDestination, let page = here.page else { return }
-        outline.reveal(here, pageIndex: document.index(for: page))
+        sidebar.reveal(here, pageIndex: document.index(for: page))
     }
 
     /// Brings the floating controls up to date with the page and zoom.
@@ -351,7 +355,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         first.page != second.page || abs(first.point.y - second.point.y) > 1 || abs(first.point.x - second.point.x) > 1
     }
 
-    /// A table of contents entry was picked. Like a link, Back returns.
+    /// A table of contents entry or a page was picked. Like a link, Back returns.
     private func go(to destination: PDFDestination) {
         let origin = pdfView.currentDestination
         pdfView.go(to: destination)
@@ -887,6 +891,6 @@ private final class MenuAction: NSMenuItem {
 /// Carries a document from the task that opened it, or a find match from
 /// PDFKit's search thread, to the main actor. PDFKit's objects are not
 /// `Sendable`, but nothing touches them in between.
-private struct PDFKitBox<Value>: @unchecked Sendable {
+struct PDFKitBox<Value>: @unchecked Sendable {
     let value: Value
 }

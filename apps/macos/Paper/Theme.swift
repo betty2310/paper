@@ -88,6 +88,14 @@ enum Theme {
         /// A table of contents entry counts as on screen when it starts this
         /// far below the top of the view, in PDF points.
         static let outlinePositionSlop: CGFloat = 8
+        /// The sidebar's page strip: 88 px page images with the number under
+        /// each, and a 2 px accent outline just outside the current page.
+        static let thumbnailWidth: CGFloat = 88
+        static let thumbnailPadding: CGFloat = 12
+        static let thumbnailLabelHeight: CGFloat = 16
+        static let thumbnailOutlineWidth: CGFloat = 2
+        static let thumbnailOutlineGap: CGFloat = 2
+        static let thumbnailOutlineRadius: CGFloat = 4
         /// The find bar's field, and room for "128 of 340" so it keeps its width.
         static let findFieldWidth: CGFloat = 180
         static let findCountWidth: CGFloat = 76
@@ -158,6 +166,11 @@ enum Theme {
         static let tabSelected = NSColor.controlBackgroundColor
         static let tabHover = NSColor.labelColor.withAlphaComponent(0.06)
         static let tabPressed = NSColor.labelColor.withAlphaComponent(0.1)
+        /// The page strip: a page's paper behind its image while it draws,
+        /// and the page border under the pointer and while pressed.
+        static let thumbnailPage = NSColor.white
+        static let thumbnailHoverBorder = NSColor.labelColor.withAlphaComponent(0.3)
+        static let thumbnailPressedBorder = NSColor.labelColor.withAlphaComponent(0.5)
         /// Find matches on the page; the current one is the selection.
         static let findMatch = NSColor.findHighlightColor
         static let swiftUIReaderBackground = SwiftUI.Color(nsColor: readerBackground)

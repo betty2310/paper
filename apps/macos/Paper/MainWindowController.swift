@@ -337,6 +337,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             return sidebar.selectedCollectionId != nil
         case #selector(openSelectedPaper(_:)):
             return activeReader == nil && store.selectedItemIds.count == 1
+        case #selector(togglePages(_:)):
+            menuItem.title = activeReader?.sidebar.showsPages == true ? "Show Contents" : "Show Pages"
+            return activeReader != nil
         case #selector(zoomIn(_:)):
             return activeReader?.canZoomIn ?? false
         case #selector(zoomOut(_:)):
@@ -456,7 +459,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private func activate(_ reader: ReaderViewController, landing: Bool = false) {
         guard activeReader !== reader else { return }
         activeReader?.savePosition()
-        sidebarContent.show(reader.outline, from: activeReader == nil ? .library : .reader)
+        sidebarContent.show(reader.sidebar, from: activeReader == nil ? .library : .reader)
         activeReader = reader
         center.show(reader, animated: true)
         updateTabs(landing: landing ? reader.itemId : nil)
@@ -483,7 +486,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             updateTabs()
         }
         center.remove(reader)
-        sidebarContent.remove(reader.outline)
+        sidebarContent.remove(reader.sidebar)
     }
 
     /// Like `showLibrary`, for when the reader in front has just closed.
@@ -552,6 +555,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     @objc func zoomToFitWidth(_ sender: Any?) { activeReader?.fitWidth() }
 
     /// Back to where the reader was before following a link (⌘[).
+    @objc func togglePages(_ sender: Any?) { activeReader?.sidebar.togglePages() }
     @objc func navigateBack(_ sender: Any?) { activeReader?.goBack() }
     @objc func navigateForward(_ sender: Any?) { activeReader?.goForward() }
 
