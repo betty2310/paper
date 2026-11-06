@@ -140,7 +140,7 @@ final class ReaderBarModel: ObservableObject {
     var addNote: () -> Void = {}
 }
 
-/// The reader's controls in one capsule over the bottom of the page, styled
+/// The reader's controls in one capsule over the top of the page, styled
 /// like the toasts: Back and Forward after following a link, the page, zoom,
 /// and the two kinds of markup.
 struct ReaderBar: View {
@@ -191,6 +191,9 @@ struct ReaderBar: View {
             icon(Theme.Symbol.note, "Add Note", selected: model.isPlacingNote, action: model.addNote)
                 .help(model.isPlacingNote ? "Cancel (Esc)" : "Add a note, then click where it goes (⌃⌘N)")
         }
+        // The end buttons sit as far inside the capsule's ends as above and
+        // below, so their round hover fills are concentric with the ends.
+        .padding(.horizontal, Theme.Size.readerBarPadding)
         .modifier(ReaderCapsule())
         .animation(reduceMotion ? nil : Theme.Toast.contentAnimation, value: model.backPage)
         .animation(reduceMotion ? nil : Theme.Toast.contentAnimation, value: model.isPlacingNote)
@@ -237,8 +240,8 @@ final class ReaderFindModel: ObservableObject {
     var close: () -> Void = {}
 }
 
-/// Find in the PDF: a capsule like the reader's controls at the top
-/// trailing corner of the page, with the field, the match count, Previous
+/// Find in the PDF: a capsule like the reader's controls, under them at the
+/// page's trailing edge, with the field, the match count, Previous
 /// and Next, and Done. Return goes to the next match and Shift Return to the
 /// previous one; Escape closes it.
 struct ReaderFindBar: View {

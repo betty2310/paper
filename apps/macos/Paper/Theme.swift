@@ -93,7 +93,7 @@ enum Theme {
         /// The find bar's field, and room for "128 of 340" so it keeps its width.
         static let findFieldWidth: CGFloat = 180
         static let findCountWidth: CGFloat = 76
-        /// The reader's floating controls, over the bottom of the page.
+        /// The reader's floating controls, over the top of the page.
         static let readerBarInset: CGFloat = 16
         static let readerBarButton: CGFloat = 28
         /// Inside the capsule's ends and inside each button.

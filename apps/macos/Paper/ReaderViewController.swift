@@ -37,7 +37,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
     private var forwardStack: [PDFDestination] = []
     /// Where a click on an internal link started, until the click ends.
     private var linkOrigin: PDFDestination?
-    /// The controls floating over the bottom of the page.
+    /// The controls floating over the top of the page.
     private let barModel = ReaderBarModel()
     private lazy var readerBar = NSHostingView(rootView: ReaderBar(model: barModel))
 
@@ -57,7 +57,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
     /// After Add Note, the next click on a page places it.
     private(set) var isPlacingNote = false
     private var noteEditor: (id: String, model: NoteEditorModel, popover: NSPopover)?
-    /// The find bar, which floats at the top trailing corner while it is open.
+    /// The find bar, which floats under the controls at the trailing edge while it is open.
     private let findModel = ReaderFindModel()
     private lazy var findBar = NSHostingView(rootView: ReaderFindBar(model: findModel))
     /// The current search's matches in document order, as PDFKit finds them.
@@ -136,7 +136,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
             failureLabel.centerYAnchor.constraint(equalTo: root.centerYAnchor),
             readerBar.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             // The hosting view includes room for the capsule's shadow.
-            readerBar.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: Theme.Toast.shadowRadius + Theme.Toast.shadowY - Theme.Size.readerBarInset),
+            readerBar.topAnchor.constraint(equalTo: root.topAnchor, constant: Theme.Size.readerBarInset - Theme.Toast.shadowRadius - Theme.Toast.shadowY),
         ])
         view = root
     }
@@ -618,7 +618,8 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
             findBar.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(findBar)
             NSLayoutConstraint.activate([
-                findBar.topAnchor.constraint(equalTo: view.topAnchor, constant: Theme.Size.readerBarInset - shadow),
+                // Under the controls, so the two never overlap in a narrow window.
+                findBar.topAnchor.constraint(equalTo: readerBar.bottomAnchor, constant: Theme.Size.gap - shadow * 2),
                 findBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: shadow - Theme.Size.readerBarInset),
             ])
             findBar.alphaValue = 0
