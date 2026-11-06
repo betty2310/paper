@@ -6,6 +6,9 @@ import SwiftUI
 /// it will add, press Return.
 struct AddPaperView: View {
     let add: (String) -> Void
+    /// For a paper with no DOI yet, such as the user's own manuscript.
+    let newPaper: () -> Void
+    let importPdfs: () -> Void
     @State private var text = ""
     @FocusState private var focused: Bool
 
@@ -41,12 +44,19 @@ struct AddPaperView: View {
             }
             .font(Theme.Font.swiftUISecondary)
             .lineLimit(1)
-            HStack {
+            HStack(spacing: Theme.Size.padding) {
+                Button("No DOI yet…", action: newPaper)
+                    .buttonStyle(.link)
+                    .help("Type in a paper's details, such as your own manuscript (⌥⌘N)")
+                Button("Import PDFs…", action: importPdfs)
+                    .buttonStyle(.link)
+                    .help("Add papers from PDFs (⇧⌘I). You can also drop PDFs on the list.")
                 Spacer()
                 Button("Add", action: submit)
                     .keyboardShortcut(.defaultAction)
                     .disabled(parsed == nil)
             }
+            .font(Theme.Font.swiftUISecondary)
         }
         .padding(Theme.Size.padding)
         .frame(width: Theme.Size.popoverWidth)

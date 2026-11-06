@@ -44,6 +44,10 @@ On first launch the app asks the user to create a new library folder or open an 
 
 The user drags a PDF into the window or uses File > Import. The app extracts the text of the first pages, looks for a DOI, and runs the DOI flow above. If no DOI is found, it searches Crossref by the title from the PDF metadata and asks the user to confirm the match. If nothing matches, it creates an item with the PDF title and lets the user fill in a DOI later.
 
+### Add a paper without a DOI
+
+A manuscript the user is writing has no DOI yet. File > New Paper Without DOI (⌥⌘N, or "No DOI yet…" in the Add Paper popover) opens a sheet where only the title is required; abstract, authors, venue, and identifiers may stay blank, and a PDF can be picked or dropped on the sheet. Nothing is looked up and no PDF is searched for. The DOI can be added later in Edit.
+
 ### Organize
 
 The sidebar lists collections. Collections can be nested, and one paper can be in several collections. The main list shows the papers of the selected collection with sortable columns (title, first author, journal, year, date added). Items can have tags. A search box filters the list by title, author, journal, tag, and note text as the user types.

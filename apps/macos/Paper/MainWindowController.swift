@@ -122,10 +122,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
         addPopover.behavior = .transient
         addPopover.contentViewController = NSHostingController(
-            rootView: AddPaperView { [weak self] identifier in
+            rootView: AddPaperView(add: { [weak self] identifier in
                 self?.addPopover.performClose(nil)
                 self?.store.add(identifier: identifier)
-            }
+            }, newPaper: { [weak self] in
+                self?.addPopover.performClose(nil)
+                self?.newPaper(nil)
+            }, importPdfs: { [weak self] in
+                self?.addPopover.performClose(nil)
+                self?.importPdfs(nil)
+            })
         )
 
         store.$scope.combineLatest(store.$items)
@@ -240,6 +246,27 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         } else {
             addPopover.show(relativeTo: item)
         }
+    }
+
+    /// A paper typed in by hand, such as a manuscript with no DOI yet.
+    @objc func newPaper(_ sender: Any?) {
+        guard let window, window.attachedSheet == nil else { return }
+        addPopover.performClose(nil)
+        showLibrary()
+        let sheet = NSWindow(contentViewController: NSHostingController(rootView: EmptyView()))
+        let editor = MetadataEditor(mode: .create { [weak self] fields, pdf in
+            self?.store.createPaper(fields: fields, pdf: pdf) ?? false
+        }, close: { [weak window, weak sheet] in
+            if let sheet { window?.endSheet(sheet) }
+        })
+        sheet.contentViewController = NSHostingController(rootView: editor)
+        window.beginSheet(sheet)
+    }
+
+    /// PDFs from an open panel, identified like dropped ones.
+    @objc func importPdfs(_ sender: Any?) {
+        showLibrary()
+        store.choosePdfsToImport()
     }
 
     /// ⌘F finds text in the PDF in front, and searches the library otherwise.

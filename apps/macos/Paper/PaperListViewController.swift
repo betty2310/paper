@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import PaperEngine
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// `NSTableView` handles arrow keys and type select itself but drops Delete
 /// and Return, so this table hands Delete and Forward Delete to the key
@@ -48,7 +49,8 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     override func loadView() {
-        let root = NSView()
+        let root = PdfDropView()
+        root.onDrop = { [weak self] urls in self?.store.importPdfs(urls) }
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("paper"))
         column.resizingMask = .autoresizingMask
@@ -104,6 +106,7 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
             emptyStateHost.centerYAnchor.constraint(equalTo: root.centerYAnchor),
             emptyStateHost.widthAnchor.constraint(lessThanOrEqualTo: root.widthAnchor, constant: -Theme.Size.padding * 2),
         ])
+        root.addHighlight()
         view = root
     }
 
@@ -396,17 +399,20 @@ final class PaperRowView: NSTableCellView {
     func configure(with item: ItemRow, pdfStatus: PdfStatus? = nil) {
         lookupStatus = item.lookupStatus
         added.stringValue = Self.addedFormatter.string(from: item.addedAt)
+        // A row added by DOI is titled with the DOI until the lookup ends; a
+        // dropped PDF's row has a real title from the start.
+        let titleFont = item.doi != nil && item.title == item.doi ? Theme.Font.monospaced : Theme.Font.rowTitle
         switch item.lookupStatus {
         case .pending:
             title.stringValue = item.title
-            title.font = Theme.Font.monospaced
+            title.font = titleFont
             subtitle.stringValue = "Looking up metadata…"
             status.image = nil
             spinner.startAnimation(nil)
         case .failed:
             title.stringValue = item.title
-            title.font = Theme.Font.monospaced
-            subtitle.stringValue = "Lookup failed"
+            title.font = titleFont
+            subtitle.stringValue = item.doi == nil ? "Not identified. Add its DOI." : "Lookup failed"
             status.image = NSImage(systemSymbolName: Theme.Symbol.failed, accessibilityDescription: "Lookup failed")
             status.contentTintColor = Theme.Color.warning
             spinner.stopAnimation(nil)
@@ -487,13 +493,121 @@ struct EmptyStateView: View {
     private var message: String {
         if !store.searchText.isEmpty { return "Nothing matches “\(store.searchText)”." }
         switch store.scope {
-        case .all: return "Paste a DOI, a doi.org link, or an arXiv ID to add your first paper."
+        case .all: return "Paste a DOI, a doi.org link, or an arXiv ID, or drop PDFs here, to add your first paper."
         case .unread: return "Papers whose PDF you have not opened show up here."
         case .recentlyAdded: return "Papers added in the last \(recentlyAddedDays()) days show up here."
         case .noPdf: return "Papers without a PDF show up here."
         case .collection: return "Drag papers from the list onto this collection to add them."
         case .tag: return "Tag a paper in the inspector to see it here."
         }
+    }
+}
+
+/// The paper list's root view. It takes PDFs dragged in from Finder, and
+/// while they are over the list it says what dropping them will do.
+@MainActor
+final class PdfDropView: NSView {
+    var onDrop: ([URL]) -> Void = { _ in }
+    private let model = DropHighlightModel()
+    private lazy var highlight = PassthroughHostingView(rootView: DropHighlight(model: model))
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    /// Puts the highlight over every other subview; call after adding them.
+    func addHighlight() {
+        highlight.translatesAutoresizingMaskIntoConstraints = false
+        highlight.isHidden = true
+        addSubview(highlight)
+        NSLayoutConstraint.activate([
+            highlight.topAnchor.constraint(equalTo: topAnchor),
+            highlight.leadingAnchor.constraint(equalTo: leadingAnchor),
+            highlight.trailingAnchor.constraint(equalTo: trailingAnchor),
+            highlight.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    /// The PDFs being dragged; folders and other files are left out.
+    private func pdfs(_ info: NSDraggingInfo) -> [URL] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [
+            .urlReadingFileURLsOnly: true,
+            .urlReadingContentsConformToTypes: [UTType.pdf.identifier],
+        ]
+        return info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL] ?? []
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let count = pdfs(sender).count
+        guard count > 0 else { return [] }
+        model.count = count
+        highlight.isHidden = false
+        return .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        highlight.isHidden ? [] : .copy
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        highlight.isHidden = true
+    }
+
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        highlight.isHidden = true
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        highlight.isHidden = true
+        let urls = pdfs(sender)
+        guard !urls.isEmpty else { return false }
+        onDrop(urls)
+        return true
+    }
+}
+
+/// A hosting view the pointer and drags go through, to the view under it.
+final class PassthroughHostingView<Content: View>: NSHostingView<Content> {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+@MainActor
+final class DropHighlightModel: ObservableObject {
+    @Published var count = 0
+}
+
+/// Covers the list while PDFs are dragged over it: an accent outline and
+/// what dropping does.
+struct DropHighlight: View {
+    @ObservedObject var model: DropHighlightModel
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: Theme.Size.cardRadius, style: .continuous)
+                .fill(Theme.Color.swiftUIAccent.opacity(Theme.Opacity.tint))
+            RoundedRectangle(cornerRadius: Theme.Size.cardRadius, style: .continuous)
+                .strokeBorder(Theme.Color.swiftUIAccent, lineWidth: Theme.Size.dropRingWidth)
+            VStack(spacing: Theme.Size.gap) {
+                Image(systemName: Theme.Symbol.importPdf)
+                    .font(Theme.Font.swiftUIDropIcon)
+                    .foregroundStyle(Theme.Color.swiftUIAccent)
+                Text(model.count == 1 ? "Add 1 PDF" : "Add \(model.count) PDFs")
+                    .font(Theme.Font.swiftUIInspectorTitle)
+                    .foregroundStyle(Theme.Color.swiftUIText)
+                Text("Paper finds which paper each one is and fills in its details.")
+                    .font(Theme.Font.swiftUISecondary)
+                    .foregroundStyle(Theme.Color.swiftUISecondaryText)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(Theme.Size.padding)
+            .background(Theme.Color.swiftUIPanel, in: RoundedRectangle(cornerRadius: Theme.Size.cardRadius, style: .continuous))
+        }
+        .padding(Theme.Size.gap)
+        .accessibilityElement(children: .combine)
     }
 }
 

@@ -60,6 +60,9 @@ enum Theme {
         static let welcomeWidth: CGFloat = 520
         static let welcomeHeight: CGFloat = 420
         static let settingsWidth: CGFloat = 460
+        /// The sheet that edits a paper's fields or takes a new paper's.
+        static let metadataEditorWidth: CGFloat = 520
+        static let metadataEditorHeight: CGFloat = 640
         /// The title and subtitle at the start of the toolbar, placed where
         /// the system puts its own: baselines from the top and between lines.
         static let windowTitleHeight: CGFloat = 32
@@ -118,6 +121,9 @@ enum Theme {
         static let noteIconSize: CGFloat = 20
         static let noteEditorWidth: CGFloat = 280
         static let noteEditorHeight: CGFloat = 120
+
+        /// The outline around the list while PDFs are dragged over it.
+        static let dropRingWidth: CGFloat = 2
 
         static let chipRadius: CGFloat = 6
         static let cardRadius: CGFloat = 8
@@ -216,6 +222,7 @@ enum Theme {
         static let swiftUIToastClose = SwiftUI.Font.system(size: 10, weight: .bold)
         static let swiftUIReaderBarIcon = SwiftUI.Font.system(size: 13, weight: .medium)
         static let swiftUIReaderBarLabel = SwiftUI.Font.system(size: 12, weight: .medium).monospacedDigit()
+        static let swiftUIDropIcon = SwiftUI.Font.system(size: 28, weight: .light)
         static let swiftUIWelcomeTitle = SwiftUI.Font.system(size: 28, weight: .semibold, design: .serif)
 
         private static func serif(size: CGFloat, weight: NSFont.Weight) -> NSFont {
@@ -367,5 +374,6 @@ enum Theme {
         static let fitWidth = "arrow.left.and.right"
         static let findPrevious = "chevron.up"
         static let findNext = "chevron.down"
+        static let importPdf = "arrow.down.doc"
     }
 }

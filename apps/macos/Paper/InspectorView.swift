@@ -1,6 +1,7 @@
 import AppKit
 import PaperEngine
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Hosts the SwiftUI inspector in the right split view item.
 @MainActor
@@ -108,7 +109,8 @@ struct ItemDetailView: View {
                     lookupFailed
                 }
                 actions
-                if detail.lookupStatus == .done {
+                // A PDF Paper could not identify is still the user's to read.
+                if detail.lookupStatus != .pending {
                     section("PDF") { pdf }
                 }
                 if let abstractText = detail.fields.abstractText, !abstractText.isEmpty {
@@ -133,9 +135,9 @@ struct ItemDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .sheet(isPresented: $showEditor) {
-            MetadataEditor(detail: detail) { patch in
+            MetadataEditor(mode: .edit(detail) { patch in
                 store.updateMetadata(itemId: detail.id, patch: patch)
-            }
+            })
         }
     }
 
@@ -200,15 +202,27 @@ struct ItemDetailView: View {
         HStack(spacing: Theme.Size.gap) {
             Image(systemName: Theme.Symbol.failed)
                 .foregroundStyle(Theme.Color.swiftUIWarning)
-            Text("The metadata lookup failed.")
+            // A dropped PDF nothing identified has no DOI to look up again.
+            Text(hasIdentifier ? "The metadata lookup failed." : "Paper could not identify this PDF. Add its DOI to look it up.")
                 .font(Theme.Font.swiftUISecondary)
                 .foregroundStyle(Theme.Color.swiftUISecondaryText)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer()
-            Button("Retry") { store.retryLookup(itemId: detail.id) }
-                .controlSize(.small)
+            if hasIdentifier {
+                Button("Retry") { store.retryLookup(itemId: detail.id) }
+                    .controlSize(.small)
+            } else {
+                Button("Add DOI…") { showEditor = true }
+                    .controlSize(.small)
+            }
         }
         .padding(Theme.Size.gap + Theme.Size.smallGap)
         .background(Theme.Color.swiftUICard, in: RoundedRectangle(cornerRadius: Theme.Size.cardRadius, style: .continuous))
+    }
+
+    /// Whether the paper has a DOI or arXiv ID to look up and search by.
+    private var hasIdentifier: Bool {
+        detail.fields.doi != nil || detail.fields.arxivId != nil
     }
 
     private var pdfAttachment: AttachmentRow? {
@@ -243,7 +257,7 @@ struct ItemDetailView: View {
                     Button("Open Publisher Page") { NSWorkspace.shared.open(url) }
                 }
                 Button("Retry Lookup") { store.retryLookup(itemId: detail.id) }
-                    .disabled(detail.lookupStatus == .pending)
+                    .disabled(detail.lookupStatus == .pending || !hasIdentifier)
                 Button("Attach PDF…") { store.chooseFileToAttach(itemId: detail.id) }
                 if let attachment = pdfAttachment {
                     Button("Reveal PDF in Finder") { store.revealAttachment(id: attachment.id) }
@@ -334,12 +348,15 @@ struct ItemDetailView: View {
                     .foregroundStyle(Theme.Color.swiftUISecondaryText)
             }
             HStack(spacing: Theme.Size.gap) {
-                Button {
-                    store.findPdf(itemId: detail.id)
-                } label: {
-                    Label(retryTitle, systemImage: Theme.Symbol.findPdf)
+                // Open access sources are searched by DOI or arXiv ID.
+                if hasIdentifier {
+                    Button {
+                        store.findPdf(itemId: detail.id)
+                    } label: {
+                        Label(retryTitle, systemImage: Theme.Symbol.findPdf)
+                    }
+                    .help("Look for an open access PDF in arXiv, OpenAlex, Unpaywall, and Europe PMC")
                 }
-                .help("Look for an open access PDF in arXiv, OpenAlex, Unpaywall, and Europe PMC")
                 Button {
                     store.chooseFileToAttach(itemId: detail.id)
                 } label: {
@@ -539,11 +556,21 @@ struct FlowLayout: Layout {
     }
 }
 
-/// Edits the fields the user can change. Saves one `MetadataPatch`.
+/// Edits a paper's fields, or takes them for a new paper typed in by hand,
+/// such as a manuscript with no DOI yet. Only the title is required.
 struct MetadataEditor: View {
+    enum Mode {
+        /// Saves one `MetadataPatch` for the paper.
+        case edit(ItemDetail, save: (MetadataPatch) -> Void)
+        /// Adds a paper with these fields and the PDF, if one was picked.
+        /// Returns whether it was added; the sheet stays open when not.
+        case create(add: (ItemFields, URL?) -> Bool)
+    }
+
     @Environment(\.dismiss) private var dismiss
-    let detail: ItemDetail
-    let save: (MetadataPatch) -> Void
+    let mode: Mode
+    /// Closes the sheet when AppKit presented it; SwiftUI sheets use `dismiss`.
+    var close: (() -> Void)?
 
     @State private var title: String
     @State private var authors: String
@@ -553,15 +580,21 @@ struct MetadataEditor: View {
     @State private var volume: String
     @State private var issue: String
     @State private var pages: String
+    @State private var abstractText: String
     @State private var doi: String
     @State private var arxivId: String
     @State private var url: String
     @State private var kind: ItemKind
+    @State private var pdf: URL?
+    @FocusState private var titleFocused: Bool
 
-    init(detail: ItemDetail, save: @escaping (MetadataPatch) -> Void) {
-        self.detail = detail
-        self.save = save
-        let fields = detail.fields
+    init(mode: Mode, close: (() -> Void)? = nil) {
+        self.mode = mode
+        self.close = close
+        var fields = ItemFields(kind: .other, doi: nil, arxivId: nil, title: "", creators: [], containerTitle: nil,
+                                containerShort: nil, publisher: nil, year: nil, publishedDate: nil, volume: nil, issue: nil,
+                                pages: nil, abstractText: nil, url: nil, issn: nil, language: nil, extra: nil)
+        if case .edit(let detail, _) = mode { fields = detail.fields }
         _title = State(initialValue: fields.title)
         _authors = State(initialValue: fields.creators.map(\.displayName).joined(separator: "\n"))
         _container = State(initialValue: fields.containerTitle ?? "")
@@ -570,10 +603,16 @@ struct MetadataEditor: View {
         _volume = State(initialValue: fields.volume ?? "")
         _issue = State(initialValue: fields.issue ?? "")
         _pages = State(initialValue: fields.pages ?? "")
+        _abstractText = State(initialValue: fields.abstractText ?? "")
         _doi = State(initialValue: fields.doi ?? "")
         _arxivId = State(initialValue: fields.arxivId ?? "")
         _url = State(initialValue: fields.url ?? "")
         _kind = State(initialValue: fields.kind ?? .other)
+    }
+
+    private var isNew: Bool {
+        if case .create = mode { return true }
+        return false
     }
 
     var body: some View {
@@ -582,6 +621,7 @@ struct MetadataEditor: View {
                 Section {
                     TextField("Title", text: $title, axis: .vertical)
                         .lineLimit(1...4)
+                        .focused($titleFocused)
                     Picker("Type", selection: $kind) {
                         ForEach([ItemKind.journalArticle, .conferencePaper, .preprint, .other], id: \.self) { kind in
                             Text(kind.label).tag(kind)
@@ -589,6 +629,20 @@ struct MetadataEditor: View {
                     }
                     TextField("Authors", text: $authors, prompt: Text("One per line, given name first"), axis: .vertical)
                         .lineLimit(2...8)
+                } header: {
+                    if isNew {
+                        Text("New Paper")
+                            .font(.headline)
+                            .foregroundStyle(Theme.Color.swiftUIText)
+                    }
+                }
+                Section("Abstract") {
+                    TextField("Abstract", text: $abstractText, prompt: Text("Optional"), axis: .vertical)
+                        .lineLimit(3...8)
+                        .labelsHidden()
+                }
+                if isNew {
+                    Section("PDF") { pdfRow }
                 }
                 Section("Venue") {
                     TextField("Journal or proceedings", text: $container)
@@ -609,23 +663,85 @@ struct MetadataEditor: View {
             .formStyle(.grouped)
             Divider()
             HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button("Save") {
-                    save(patch)
-                    dismiss()
+                if isNew {
+                    Text("Only the title is required.")
+                        .font(Theme.Font.swiftUISecondary)
+                        .foregroundStyle(Theme.Color.swiftUISecondaryText)
                 }
-                .keyboardShortcut(.defaultAction)
-                .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                Spacer()
+                Button("Cancel", action: finish)
+                    .keyboardShortcut(.cancelAction)
+                Button(isNew ? "Add Paper" : "Save", action: save)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(trimmed(title).isEmpty)
             }
             .padding(Theme.Size.padding)
         }
-        .frame(width: Theme.Size.settingsWidth + 60, height: 560)
+        .frame(width: Theme.Size.metadataEditorWidth, height: Theme.Size.metadataEditorHeight)
+        .onAppear { if isNew { titleFocused = true } }
     }
 
-    private var patch: MetadataPatch {
-        let creators = authors
+    /// The picked PDF with a way to drop it, or a button to pick one. A PDF
+    /// dragged from Finder onto the row is picked too.
+    private var pdfRow: some View {
+        HStack(spacing: Theme.Size.gap) {
+            Image(systemName: Theme.Symbol.pdf)
+                .foregroundStyle(pdf == nil ? Theme.Color.swiftUITertiaryText : Theme.Color.swiftUIAccent)
+            Text(pdf?.lastPathComponent ?? "No PDF yet. You can attach one later.")
+                .foregroundStyle(pdf == nil ? Theme.Color.swiftUISecondaryText : Theme.Color.swiftUIText)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 0)
+            if pdf != nil {
+                Button("Remove") { pdf = nil }
+            }
+            Button(pdf == nil ? "Choose…" : "Change…", action: choosePdf)
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let url = urls.first(where: { UTType(filenameExtension: $0.pathExtension)?.conforms(to: .pdf) == true }) else { return false }
+            pdf = url
+            return true
+        }
+    }
+
+    private func choosePdf() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose PDF"
+        panel.message = "Paper copies the PDF into the library and leaves the original alone."
+        panel.allowedContentTypes = [.pdf]
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        pdf = url
+    }
+
+    private func save() {
+        guard !trimmed(title).isEmpty else { return }
+        switch mode {
+        case .edit(_, let save):
+            save(patch)
+        case .create(let add):
+            guard add(newFields, pdf) else { return }
+        }
+        finish()
+    }
+
+    private func finish() {
+        if let close { close() } else { dismiss() }
+    }
+
+    private func trimmed(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Typed text, or nil for a field left blank.
+    private func optional(_ text: String) -> String? {
+        let text = trimmed(text)
+        return text.isEmpty ? nil : text
+    }
+
+    private var creators: [Creator] {
+        authors
             .split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
@@ -634,22 +750,48 @@ struct MetadataEditor: View {
                 let family = parts.popLast()
                 return Creator(role: .author, family: family, given: parts.isEmpty ? nil : parts.joined(separator: " "), literal: nil, orcid: nil)
             }
-        return MetadataPatch(
+    }
+
+    private var patch: MetadataPatch {
+        MetadataPatch(
             kind: kind,
-            doi: doi.trimmingCharacters(in: .whitespaces),
-            arxivId: arxivId.trimmingCharacters(in: .whitespaces),
-            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+            doi: trimmed(doi),
+            arxivId: trimmed(arxivId),
+            title: trimmed(title),
             creators: creators,
             containerTitle: container,
             containerShort: containerShort,
             publisher: nil,
-            year: Int32(year.trimmingCharacters(in: .whitespaces)),
+            year: Int32(trimmed(year)),
             publishedDate: nil,
             volume: volume,
             issue: issue,
             pages: pages,
-            abstractText: nil,
+            abstractText: trimmed(abstractText),
             url: url
+        )
+    }
+
+    private var newFields: ItemFields {
+        ItemFields(
+            kind: kind,
+            doi: optional(doi),
+            arxivId: optional(arxivId),
+            title: trimmed(title),
+            creators: creators,
+            containerTitle: optional(container),
+            containerShort: optional(containerShort),
+            publisher: nil,
+            year: Int32(trimmed(year)),
+            publishedDate: nil,
+            volume: optional(volume),
+            issue: optional(issue),
+            pages: optional(pages),
+            abstractText: optional(abstractText),
+            url: optional(url),
+            issn: nil,
+            language: nil,
+            extra: nil
         )
     }
 }

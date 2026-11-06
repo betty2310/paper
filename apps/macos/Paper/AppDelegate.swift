@@ -258,6 +258,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         recentItem.submenu = recentMenu
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Add Paper…", action: #selector(MainWindowController.addPaper(_:)), keyEquivalent: "n")
+        let newPaperItem = fileMenu.addItem(withTitle: "New Paper Without DOI…", action: #selector(MainWindowController.newPaper(_:)), keyEquivalent: "n")
+        newPaperItem.keyEquivalentModifierMask = [.command, .option]
+        let importItem = fileMenu.addItem(withTitle: "Import PDFs…", action: #selector(MainWindowController.importPdfs(_:)), keyEquivalent: "i")
+        importItem.keyEquivalentModifierMask = [.command, .shift]
         let newCollectionItem = fileMenu.addItem(withTitle: "New Collection", action: #selector(MainWindowController.newCollection(_:)), keyEquivalent: "n")
         newCollectionItem.keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(withTitle: "New Subcollection", action: #selector(MainWindowController.newSubcollection(_:)), keyEquivalent: "")

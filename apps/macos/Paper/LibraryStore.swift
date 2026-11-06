@@ -159,7 +159,8 @@ final class LibraryStore: ObservableObject {
         switch status {
         case .pending:
             show(Toast(id: id, style: .working(progress: nil), message: "Looking up paper",
-                       subject: items.first { $0.id == itemId }?.doi))
+                       // A dropped PDF has no DOI yet; its row is named after the file.
+                       subject: items.first { $0.id == itemId }.map { $0.doi ?? $0.title }))
         case .done:
             // The PDF search that starts next takes the toast over.
             show(Toast(id: id, style: .done, message: "Added to library", subject: subject(itemId)))
@@ -248,6 +249,73 @@ final class LibraryStore: ObservableObject {
                 report(error)
             }
         }
+    }
+
+    /// Adds a paper for each PDF, such as files dropped on the list. Each row
+    /// appears at once named after its file; the engine works out which
+    /// paper it is, and the toast says how that went.
+    func importPdfs(_ urls: [URL]) {
+        for url in urls {
+            Task {
+                do {
+                    let imported = try await engine.importPdf(path: url.path)
+                    importFinished(imported)
+                    // One file is like adding one paper: its row is selected.
+                    if urls.count == 1 { select(imported.item.id) }
+                } catch {
+                    report(error)
+                }
+            }
+        }
+    }
+
+    private func importFinished(_ imported: ImportedPdf) {
+        let itemId = imported.item.id
+        let id = Toast.itemId(itemId)
+        let title = imported.item.title
+        let reveal = Toast.Action(title: "Show") { [weak self] in
+            self?.dismissToast(id: id)
+            self?.select(itemId)
+        }
+        switch imported.identification {
+        case .fileText, .model:
+            show(Toast(id: id, style: .done, message: "Added to library", subject: title, action: openAction(itemId)))
+        case .titleSearch:
+            // Titles can collide, so the toast invites a look.
+            show(Toast(id: id, style: .done, message: "Added by matching its title", subject: title, action: reveal))
+        case .notFound:
+            show(Toast(id: id, style: .warning, message: "Could not identify the PDF", subject: title, action: reveal))
+        case .failed(let message):
+            show(Toast(id: id, style: .error, message: "Could not identify the PDF", detail: message,
+                       subject: title, action: reveal))
+        }
+    }
+
+    /// Adds a paper typed in by hand, with the PDF if one was picked.
+    /// Returns whether the paper was added.
+    @discardableResult
+    func createPaper(fields: ItemFields, pdf: URL?) -> Bool {
+        do {
+            let row = try engine.createItem(fields: fields)
+            select(row.id)
+            if let pdf { attachFile(itemId: row.id, url: pdf) }
+            return true
+        } catch {
+            report(error)
+            return false
+        }
+    }
+
+    /// Asks for PDFs and imports them.
+    func choosePdfsToImport() {
+        let panel = NSOpenPanel()
+        panel.title = "Import PDFs"
+        panel.message = "Paper finds which paper each PDF is and copies it into the library."
+        panel.allowedContentTypes = [.pdf]
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Import"
+        guard panel.runModal() == .OK else { return }
+        importPdfs(panel.urls)
     }
 
     func retryLookup(itemId: String) {
@@ -528,6 +596,13 @@ final class LibraryStore: ObservableObject {
         }
         switch error as? PaperError {
         case .Duplicate(let doi, let itemId):
+            // The row added for the lookup or the import is gone, and with
+            // it any word on how its lookup ended.
+            for toast in toasts where toast.id.hasPrefix(Toast.itemId("")) && toast.style == .working(progress: nil) {
+                if (try? engine.itemDetail(id: String(toast.id.dropFirst(Toast.itemId("").count)))) == nil {
+                    dismissToast(id: toast.id)
+                }
+            }
             show(Toast(id: Toast.itemId(itemId), style: .warning, message: "Already in your library", subject: subject(itemId) ?? doi,
                        action: .init(title: "Show") { [weak self] in
                            self?.dismissToast(id: Toast.itemId(itemId))
