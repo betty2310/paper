@@ -60,6 +60,7 @@ enum Theme {
         static let welcomeWidth: CGFloat = 520
         static let welcomeHeight: CGFloat = 420
         static let settingsWidth: CGFloat = 460
+        static let settingsHeight: CGFloat = 360
         /// The sheet that edits a paper's fields or takes a new paper's.
         static let metadataEditorWidth: CGFloat = 520
         static let metadataEditorHeight: CGFloat = 640

@@ -6,12 +6,14 @@ struct SettingsView: View {
     @ObservedObject var store: LibraryStore
     @State private var contactEmail: String
     @State private var openalexApiKey: String
+    @State private var anthropicApiKey: String
 
     init(store: LibraryStore) {
         self.store = store
         let settings = store.settings
         _contactEmail = State(initialValue: settings.contactEmail)
         _openalexApiKey = State(initialValue: settings.openalexApiKey)
+        _anthropicApiKey = State(initialValue: settings.anthropicApiKey)
     }
 
     var body: some View {
@@ -32,23 +34,36 @@ struct SettingsView: View {
                     .foregroundStyle(Theme.Color.swiftUISecondaryText)
             }
             Section {
+                SecureField("Anthropic API key", text: $anthropicApiKey, prompt: Text("Optional"))
+                    .onSubmit(save)
+                Text("With a key, a dropped PDF that names no DOI and whose title finds nothing is read by Claude Haiku from an image of page 1. Stored in Paper's settings file on this Mac.")
+                    .font(Theme.Font.swiftUICaption)
+                    .foregroundStyle(Theme.Color.swiftUISecondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Section {
                 LabeledContent("Library", value: store.libraryPath)
                     .font(Theme.Font.swiftUISecondary)
             }
         }
         .formStyle(.grouped)
-        .frame(width: Theme.Size.settingsWidth)
+        // A grouped form scrolls and so has no height of its own to size the window by.
+        .frame(width: Theme.Size.settingsWidth, height: Theme.Size.settingsHeight)
         .onChange(of: contactEmail) { save() }
         .onChange(of: openalexApiKey) { save() }
+        .onChange(of: anthropicApiKey) { save() }
     }
 
     private func save() {
         var settings = store.settings
         let email = contactEmail.trimmingCharacters(in: .whitespacesAndNewlines)
-        let key = openalexApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard settings.contactEmail != email || settings.openalexApiKey != key else { return }
+        let openalexKey = openalexApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let anthropicKey = anthropicApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard settings.contactEmail != email || settings.openalexApiKey != openalexKey
+            || settings.anthropicApiKey != anthropicKey else { return }
         settings.contactEmail = email
-        settings.openalexApiKey = key
+        settings.openalexApiKey = openalexKey
+        settings.anthropicApiKey = anthropicKey
         store.updateSettings(settings)
     }
 }
