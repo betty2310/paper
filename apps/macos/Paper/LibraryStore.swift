@@ -339,6 +339,14 @@ final class LibraryStore: ObservableObject {
         (try? engine.itemDetail(id: itemId))?.attachments.first { $0.mime == "application/pdf" }
     }
 
+    /// The papers' preview pictures, shared by the list and the inspector.
+    private(set) lazy var previews = PaperPreviews(store: self)
+
+    /// Where the first figure of a PDF is; read on an engine thread.
+    func firstFigure(attachmentId: String) async throws -> Figure? {
+        try await engine.firstFigure(attachmentId: attachmentId)
+    }
+
     /// Searches the open access sources again. Progress arrives as `pdfStatus`.
     func findPdf(itemId: String) {
         Task {

@@ -118,6 +118,11 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
             .receive(on: DispatchQueue.main)
             .sink { [weak self] items in self?.reload(items) }
             .store(in: &subscriptions)
+        // Figures arrive one by one without changing the rows themselves.
+        store.previews.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshVisibleRows() }
+            .store(in: &subscriptions)
         // PDF searches start and end without changing the rows themselves.
         store.$pdfStatus
             .receive(on: DispatchQueue.main)
@@ -160,7 +165,7 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
         guard visible.length > 0 else { return }
         for row in visible.location..<min(visible.location + visible.length, shownItems.count) {
             (tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? PaperRowView)?
-                .configure(with: shownItems[row], pdfStatus: store.pdfStatus[shownItems[row].id])
+                .configure(with: shownItems[row], pdfStatus: store.pdfStatus[shownItems[row].id], preview: preview(of: shownItems[row]))
         }
     }
 
@@ -284,8 +289,12 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let cell = tableView.makeView(withIdentifier: Self.cellIdentifier, owner: self) as? PaperRowView
             ?? PaperRowView(identifier: Self.cellIdentifier)
-        cell.configure(with: shownItems[row], pdfStatus: store.pdfStatus[shownItems[row].id])
+        cell.configure(with: shownItems[row], pdfStatus: store.pdfStatus[shownItems[row].id], preview: preview(of: shownItems[row]))
         return cell
+    }
+
+    private func preview(of item: ItemRow) -> PaperPreviews.Preview {
+        store.previews.preview(itemId: item.id, title: item.title, hasPdf: item.hasPdf)
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
@@ -333,6 +342,7 @@ extension PaperListViewController: NSMenuDelegate {
 /// A two line paper row: serif title, metadata line, and a status at the right.
 @MainActor
 final class PaperRowView: NSTableCellView {
+    private let preview = PaperPreviewTile()
     private let title = NSTextField(labelWithString: "")
     private let subtitle = NSTextField(labelWithString: "")
     private let added = NSTextField(labelWithString: "")
@@ -367,7 +377,7 @@ final class PaperRowView: NSTableCellView {
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
 
-        for subview in [title, subtitle, added, status, spinner] as [NSView] {
+        for subview in [preview, title, subtitle, added, status, spinner] as [NSView] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             addSubview(subview)
         }
@@ -375,7 +385,11 @@ final class PaperRowView: NSTableCellView {
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         subtitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Theme.Size.rowInset),
+            preview.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Theme.Size.rowInset),
+            preview.centerYAnchor.constraint(equalTo: centerYAnchor),
+            preview.widthAnchor.constraint(equalToConstant: Theme.Size.rowPreviewWidth),
+            preview.heightAnchor.constraint(equalToConstant: Theme.Size.rowPreviewHeight),
+            title.leadingAnchor.constraint(equalTo: preview.trailingAnchor, constant: Theme.Size.rowInset),
             title.trailingAnchor.constraint(lessThanOrEqualTo: added.leadingAnchor, constant: -Theme.Size.gap),
             title.topAnchor.constraint(equalTo: topAnchor, constant: Theme.Size.gap),
             subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor),
@@ -398,8 +412,9 @@ final class PaperRowView: NSTableCellView {
     /// The serif title, which flies into the tab when the PDF opens.
     var titleField: NSTextField { title }
 
-    func configure(with item: ItemRow, pdfStatus: PdfStatus? = nil) {
+    func configure(with item: ItemRow, pdfStatus: PdfStatus? = nil, preview: PaperPreviews.Preview) {
         lookupStatus = item.lookupStatus
+        self.preview.show(preview)
         added.stringValue = Self.addedFormatter.string(from: item.addedAt)
         // A row added by DOI is titled with the DOI until the lookup ends; a
         // dropped PDF's row has a real title from the start.
@@ -449,6 +464,91 @@ final class PaperRowView: NSTableCellView {
         if lookupStatus == .done {
             status.contentTintColor = emphasized ? Theme.Color.selectedText : Theme.Color.secondaryText
         }
+    }
+}
+
+/// A paper's preview at the start of its row: the whole figure fitted on
+/// white, or the title's first letter on a soft color, with a hairline
+/// border.
+@MainActor
+final class PaperPreviewTile: NSView {
+    private let figure = CALayer()
+    private let letter = NSTextField(labelWithString: "")
+    private var background = Theme.Preview.figureBackground
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = Theme.Size.previewRadius
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
+        figure.contentsGravity = .resizeAspect
+        // The cached image is much larger than the tile; average it down.
+        figure.minificationFilter = .trilinear
+        figure.isHidden = true
+        layer?.addSublayer(figure)
+        letter.font = Theme.Font.rowPreviewLetter
+        letter.alignment = .center
+        letter.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(letter)
+        NSLayoutConstraint.activate([
+            letter.centerXAnchor.constraint(equalTo: centerXAnchor),
+            letter.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        setAccessibilityElement(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    func show(_ preview: PaperPreviews.Preview) {
+        switch preview {
+        case .figure(_, let image):
+            figure.contents = image
+            figure.isHidden = false
+            letter.isHidden = true
+            background = Theme.Preview.figureBackground
+        case .loading:
+            figure.contents = nil
+            figure.isHidden = true
+            letter.isHidden = true
+            background = Theme.Preview.figureBackground
+        case .letter(let text, let tile):
+            figure.contents = nil
+            figure.isHidden = true
+            letter.isHidden = false
+            letter.stringValue = text
+            letter.textColor = tile.letter
+            background = tile.background
+        }
+        needsDisplay = true
+    }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        figure.frame = bounds.insetBy(dx: Theme.Size.rowPreviewInset, dy: Theme.Size.rowPreviewInset)
+        CATransaction.commit()
+    }
+
+    override func updateLayer() {
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
+        figure.contentsScale = scale
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = background.cgColor
+            layer?.borderColor = Theme.Preview.border.cgColor
+        }
+        // One physical pixel.
+        layer?.borderWidth = 1 / scale
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        needsDisplay = true
     }
 }
 

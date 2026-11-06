@@ -20,10 +20,10 @@ use std::time::{Duration, Instant};
 
 pub use paper_core::{
     Annotation, AnnotationKind, AnnotationPatch, AttachmentFile, AttachmentRow, CollectionNode,
-    Creator, CreatorRole, Identification, ImportedPdf, ItemDetail, ItemFields, ItemKind, ItemQuery,
-    ItemRow, LookupStatus, MAX_RECENT_LIBRARIES, MetadataPatch, NewAnnotation, PagePoint, PageRect,
-    PaperError, PdfStatus, PdfStep, Quad, RECENTLY_ADDED_DAYS, Scope, Settings, SortColumn,
-    SourceRecord, Tag, WindowState,
+    Creator, CreatorRole, Figure, FigureSource, Identification, ImportedPdf, ItemDetail,
+    ItemFields, ItemKind, ItemQuery, ItemRow, LookupStatus, MAX_RECENT_LIBRARIES, MetadataPatch,
+    NewAnnotation, PagePoint, PageRect, PaperError, PdfStatus, PdfStep, Quad, RECENTLY_ADDED_DAYS,
+    Scope, Settings, SortColumn, SourceRecord, Tag, WindowState,
 };
 use paper_core::{Library, SettingsStore};
 pub use paper_fetch::HttpClient;
@@ -523,6 +523,43 @@ impl Engine {
             last_page: row.last_page,
             last_zoom: row.last_zoom,
         })
+    }
+
+    /// Where the first figure of a PDF attachment is: the region above its
+    /// "Figure 1" caption in the first pages, or else its largest embedded
+    /// image. `None` when the PDF has neither. Reading the file takes a
+    /// second or two for a large PDF, so the app caches what it draws from
+    /// the answer.
+    pub async fn first_figure(&self, attachment_id: &str) -> Result<Option<Figure>> {
+        self.ensure_open()?;
+        let row = self.library.attachment(attachment_id)?;
+        let path = self.library.attachment_path(&row);
+        let outcome = self
+            .run(move || {
+                let bytes = std::fs::read(&path)?;
+                let Ok(file) = paper_identify::PdfFile::open(bytes) else {
+                    return Ok(None);
+                };
+                Ok(file.first_figure().map(|region| Figure {
+                    page_index: region.page_index as i32,
+                    rect: PageRect {
+                        x0: region.rect.x0.into(),
+                        y0: region.rect.y0.into(),
+                        x1: region.rect.x1.into(),
+                        y1: region.rect.y1.into(),
+                    },
+                    source: match region.source {
+                        paper_identify::FigureSource::Caption => FigureSource::Caption,
+                        paper_identify::FigureSource::LargestImage => FigureSource::LargestImage,
+                    },
+                }))
+            })
+            .await;
+        match outcome {
+            Ok(outcome) => outcome,
+            Err(PoolError::Closed) => Err(PaperError::Closed),
+            Err(PoolError::Panicked(message)) => Err(PaperError::Io { message }),
+        }
     }
 
     /// Remembers the reader's page (0 based) and zoom for an attachment. The

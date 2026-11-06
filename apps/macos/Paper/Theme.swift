@@ -48,6 +48,22 @@ enum Theme {
         /// Two line paper rows: title and metadata.
         static let rowHeight: CGFloat = 52
         static let rowInset: CGFloat = 12
+        /// The paper's preview at the start of its row: its whole first
+        /// figure fitted inside, or the first letter of its title. Wider than
+        /// tall, because most figures are.
+        static let rowPreviewWidth: CGFloat = 56
+        static let rowPreviewHeight: CGFloat = 40
+        /// White space between a fitted figure and the tile's edge.
+        static let rowPreviewInset: CGFloat = 4
+        static let previewRadius: CGFloat = 6
+        /// The larger preview at the top of the inspector.
+        static let inspectorPreviewMaxHeight: CGFloat = 200
+        static let inspectorLetterHeight: CGFloat = 96
+        /// The longer side of a cached figure image, in pixels: enough for
+        /// the inspector at 2x.
+        static let previewPixels: CGFloat = 720
+        /// A small figure is drawn at most this many pixels per point.
+        static let previewMaxScale: CGFloat = 4
         static let rowTrailingWidth: CGFloat = 56
         static let statusIndicatorSize: CGFloat = 14
         static let sidebarRowHeight: CGFloat = 28
@@ -249,6 +265,10 @@ enum Theme {
         static let swiftUIDropIcon = SwiftUI.Font.system(size: 28, weight: .light)
         static let swiftUIWelcomeTitle = SwiftUI.Font.system(size: 28, weight: .semibold, design: .serif)
 
+        /// The letter on a preview tile of a paper without a figure.
+        static let rowPreviewLetter = serif(size: 20, weight: .regular)
+        static let swiftUIInspectorPreviewLetter = SwiftUI.Font.system(size: 48, weight: .regular, design: .serif)
+
         private static func serif(size: CGFloat, weight: NSFont.Weight) -> NSFont {
             let base = NSFont.systemFont(ofSize: size, weight: weight)
             guard let descriptor = base.fontDescriptor.withDesign(.serif),
@@ -311,6 +331,33 @@ enum Theme {
         static let shadowRadius: CGFloat = 8
         static let shadowY: CGFloat = 2
         static let pressedScale: CGFloat = 0.88
+    }
+
+    /// Paper previews: figures sit on white like the page they came from, and
+    /// a paper without one gets its title's first letter on a soft color,
+    /// picked from its title so it stays the same.
+    enum Preview {
+        struct Tile {
+            let background: NSColor
+            let letter: NSColor
+            var swiftUIBackground: SwiftUI.Color { SwiftUI.Color(nsColor: background) }
+            var swiftUILetter: SwiftUI.Color { SwiftUI.Color(nsColor: letter) }
+        }
+
+        static let figureBackground = NSColor.white
+        /// The same white, for drawing figures off the main thread.
+        nonisolated static let figureBackgroundCG = CGColor(gray: 1, alpha: 1)
+        static let swiftUIFigureBackground = SwiftUI.Color(nsColor: figureBackground)
+        static let border = NSColor.labelColor.withAlphaComponent(0.12)
+        static let swiftUIBorder = SwiftUI.Color(nsColor: border)
+        static let tiles = [
+            ("#E3EAF5", "#3D5A8A"),
+            ("#E4EFE0", "#4A6B3F"),
+            ("#F4E9DA", "#8A5E2E"),
+            ("#F3E3E8", "#8A4357"),
+            ("#EAE4F3", "#5E4A86"),
+            ("#DFEEEC", "#36706A"),
+        ].map { Tile(background: NSColor(hexString: $0.0)!, letter: NSColor(hexString: $0.1)!) }
     }
 
     /// The raised active tab's soft shadow.

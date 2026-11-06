@@ -409,6 +409,26 @@ pub struct PageRect {
     pub y1: f64,
 }
 
+/// Where a PDF's first figure is, for the paper's preview picture. The app
+/// draws this part of the page itself.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Figure {
+    /// 0 based.
+    pub page_index: i32,
+    /// In PDF user space, inside the page's media box.
+    pub rect: PageRect,
+    pub source: FigureSource,
+}
+
+/// How `Figure` was found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FigureSource {
+    /// The drawings and images above the "Figure 1" caption.
+    Caption,
+    /// No caption led to a figure; this is the largest embedded image.
+    LargestImage,
+}
+
 /// A highlight or note on one page of a PDF attachment. The PDF file is never
 /// changed; annotations live only in the library.
 #[derive(Debug, Clone, PartialEq)]

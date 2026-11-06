@@ -47,6 +47,50 @@ struct InspectorView: View {
     }
 }
 
+/// The paper's preview, larger: the whole figure on white, or the title's
+/// first letter on its soft color. Double clicking a figure opens the PDF.
+struct InspectorPreview: View {
+    @ObservedObject var previews: PaperPreviews
+    let itemId: String
+    let title: String
+    let hasPdf: Bool
+    let open: () -> Void
+    @Environment(\.displayScale) private var displayScale
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Size.cardRadius, style: .continuous)
+        Group {
+            switch previews.preview(itemId: itemId, title: title, hasPdf: hasPdf) {
+            case .figure(let image, _):
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: Theme.Size.inspectorPreviewMaxHeight)
+                    .padding(Theme.Size.gap)
+                    .background(Theme.Preview.swiftUIFigureBackground)
+                    .contentShape(shape)
+                    .onTapGesture(count: 2, perform: open)
+                    .help("Double click to read")
+                    .accessibilityLabel("First figure")
+            case .loading:
+                Theme.Preview.swiftUIFigureBackground
+                    .frame(height: Theme.Size.inspectorLetterHeight)
+            case .letter(let letter, let tile):
+                Text(letter)
+                    .font(Theme.Font.swiftUIInspectorPreviewLetter)
+                    .foregroundStyle(tile.swiftUILetter)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: Theme.Size.inspectorLetterHeight)
+                    .background(tile.swiftUIBackground)
+                    .accessibilityHidden(true)
+            }
+        }
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(Theme.Preview.swiftUIBorder, lineWidth: 1 / displayScale))
+    }
+}
+
 struct NoSelectionView: View {
     var body: some View {
         VStack(spacing: Theme.Size.gap) {
@@ -102,6 +146,10 @@ struct ItemDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Size.padding) {
+                InspectorPreview(
+                    previews: store.previews, itemId: detail.id, title: detail.fields.title,
+                    hasPdf: pdfAttachment != nil, open: openPDF
+                )
                 header
                 if detail.lookupStatus == .pending {
                     lookupPending

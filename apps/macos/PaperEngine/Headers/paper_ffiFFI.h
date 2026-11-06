@@ -394,6 +394,11 @@ void uniffi_paper_ffi_fn_method_engine_delete_items(uint64_t ptr, RustBuffer ids
 uint64_t uniffi_paper_ffi_fn_method_engine_find_pdf(uint64_t ptr, RustBuffer item_id
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_FIRST_FIGURE
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_FIRST_FIGURE
+uint64_t uniffi_paper_ffi_fn_method_engine_first_figure(uint64_t ptr, RustBuffer attachment_id
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_IMPORT_PDF
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_IMPORT_PDF
 uint64_t uniffi_paper_ffi_fn_method_engine_import_pdf(uint64_t ptr, RustBuffer path
@@ -937,6 +942,12 @@ uint16_t uniffi_paper_ffi_checksum_method_engine_delete_items(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_FIND_PDF
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_FIND_PDF
 uint16_t uniffi_paper_ffi_checksum_method_engine_find_pdf(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_FIRST_FIGURE
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_FIRST_FIGURE
+uint16_t uniffi_paper_ffi_checksum_method_engine_first_figure(void
     
 );
 #endif

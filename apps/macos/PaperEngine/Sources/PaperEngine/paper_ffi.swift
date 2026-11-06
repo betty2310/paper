@@ -680,6 +680,8 @@ public protocol EngineProtocol: AnyObject, Sendable {
     
     func findPdf(itemId: String) async throws  -> AttachmentRow
     
+    func firstFigure(attachmentId: String) async throws  -> Figure?
+    
     func importPdf(path: String) async throws  -> ImportedPdf
     
     func itemDetail(id: String) throws  -> ItemDetail
@@ -952,6 +954,22 @@ open func findPdf(itemId: String)async throws  -> AttachmentRow  {
             completeFunc: ffi_paper_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_paper_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeAttachmentRow_lift,
+            errorHandler: FfiConverterTypePaperError_lift
+        )
+}
+    
+open func firstFigure(attachmentId: String)async throws  -> Figure?  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_paper_ffi_fn_method_engine_first_figure(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(attachmentId)
+                )
+            },
+            pollFunc: ffi_paper_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_paper_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_paper_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionTypeFigure.lift,
             errorHandler: FfiConverterTypePaperError_lift
         )
 }
@@ -2029,6 +2047,64 @@ public func FfiConverterTypeCreator_lift(_ buf: RustBuffer) throws -> Creator {
 #endif
 public func FfiConverterTypeCreator_lower(_ value: Creator) -> RustBuffer {
     return FfiConverterTypeCreator.lower(value)
+}
+
+
+public struct Figure: Equatable, Hashable {
+    public var pageIndex: Int32
+    public var rect: PageRect
+    public var source: FigureSource
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(pageIndex: Int32, rect: PageRect, source: FigureSource) {
+        self.pageIndex = pageIndex
+        self.rect = rect
+        self.source = source
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension Figure: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFigure: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Figure {
+        return
+            try Figure(
+                pageIndex: FfiConverterInt32.read(from: &buf), 
+                rect: FfiConverterTypePageRect.read(from: &buf), 
+                source: FfiConverterTypeFigureSource.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Figure, into buf: inout [UInt8]) {
+        FfiConverterInt32.write(value.pageIndex, into: &buf)
+        FfiConverterTypePageRect.write(value.rect, into: &buf)
+        FfiConverterTypeFigureSource.write(value.source, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFigure_lift(_ buf: RustBuffer) throws -> Figure {
+    return try FfiConverterTypeFigure.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFigure_lower(_ value: Figure) -> RustBuffer {
+    return FfiConverterTypeFigure.lower(value)
 }
 
 
@@ -3139,6 +3215,72 @@ public func FfiConverterTypeCreatorRole_lower(_ value: CreatorRole) -> RustBuffe
 
 
 
+public enum FigureSource: Equatable, Hashable {
+    
+    case caption
+    case largestImage
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension FigureSource: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFigureSource: FfiConverterRustBuffer {
+    typealias SwiftType = FigureSource
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FigureSource {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .caption
+        
+        case 2: return .largestImage
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FigureSource, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .caption:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .largestImage:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFigureSource_lift(_ buf: RustBuffer) throws -> FigureSource {
+    return try FfiConverterTypeFigureSource.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFigureSource_lower(_ value: FigureSource) -> RustBuffer {
+    return FfiConverterTypeFigureSource.lower(value)
+}
+
+
+
+
 public enum Identification: Equatable, Hashable {
     
     case fileText
@@ -4019,6 +4161,30 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeFigure: FfiConverterRustBuffer {
+    typealias SwiftType = Figure?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeFigure.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeFigure.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypePageRect: FfiConverterRustBuffer {
     typealias SwiftType = PageRect?
 
@@ -4496,6 +4662,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_find_pdf() != 62843) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paper_ffi_checksum_method_engine_first_figure() != 57028) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_import_pdf() != 12258) {

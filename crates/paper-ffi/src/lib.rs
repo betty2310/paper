@@ -12,9 +12,10 @@ use std::time::SystemTime;
 use paper_engine as engine;
 use paper_engine::{
     Annotation, AnnotationKind, AnnotationPatch, AttachmentFile, AttachmentRow, CollectionNode,
-    Creator, CreatorRole, Identification, ImportedPdf, ItemDetail, ItemFields, ItemKind, ItemQuery,
-    ItemRow, LookupStatus, MetadataPatch, NewAnnotation, PagePoint, PageRect, PaperError,
-    PdfStatus, PdfStep, Quad, Scope, Settings, SortColumn, Tag, WindowState,
+    Creator, CreatorRole, Figure, FigureSource, Identification, ImportedPdf, ItemDetail,
+    ItemFields, ItemKind, ItemQuery, ItemRow, LookupStatus, MetadataPatch, NewAnnotation,
+    PagePoint, PageRect, PaperError, PdfStatus, PdfStep, Quad, Scope, Settings, SortColumn, Tag,
+    WindowState,
 };
 
 uniffi::setup_scaffolding!();
@@ -63,6 +64,12 @@ pub enum Identification {
     Model,
     NotFound,
     Failed { message: String },
+}
+
+#[uniffi::remote(Enum)]
+pub enum FigureSource {
+    Caption,
+    LargestImage,
 }
 
 #[uniffi::remote(Enum)]
@@ -297,6 +304,13 @@ pub struct PageRect {
 }
 
 #[uniffi::remote(Record)]
+pub struct Figure {
+    pub page_index: i32,
+    pub rect: PageRect,
+    pub source: FigureSource,
+}
+
+#[uniffi::remote(Record)]
 pub struct Annotation {
     pub id: String,
     pub attachment_id: String,
@@ -506,6 +520,10 @@ impl Engine {
 
     pub fn attachment_file(&self, id: String) -> Result<AttachmentFile, PaperError> {
         self.0.attachment_file(&id)
+    }
+
+    pub async fn first_figure(&self, attachment_id: String) -> Result<Option<Figure>, PaperError> {
+        self.0.first_figure(&attachment_id).await
     }
 
     pub fn set_reading_position(&self, id: String, page: i32, zoom: f64) -> Result<(), PaperError> {

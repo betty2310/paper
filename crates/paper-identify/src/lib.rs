@@ -11,8 +11,12 @@
 //! The approach and its measured accuracy are in
 //! `docs/research/pdf-identification.md`.
 
+mod figure;
+
 use std::collections::HashMap;
 use std::sync::LazyLock;
+
+pub use figure::{FIGURE_PAGES, FigureRegion, FigureSource, Rect};
 
 use paper_ids::Identifier;
 use pdf_oxide::PdfDocument;
