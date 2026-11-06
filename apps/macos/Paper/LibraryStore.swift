@@ -39,6 +39,10 @@ final class LibraryStore: ObservableObject {
     /// The pointer is over the toasts, so none of them leaves.
     private var holdingToasts = false
     private var noteSaveTimer: Timer?
+    /// Bumped when the library comes back after a reader, whose note panel
+    /// may have changed a note; the inspector then reloads its text. Its own
+    /// saves never bump it, so they never replace text being typed.
+    @Published private(set) var noteRevision = 0
     private var pendingNote: (itemId: String, markdown: String)?
 
     init(libraryPath: String, create: Bool) throws {
@@ -480,13 +484,32 @@ final class LibraryStore: ObservableObject {
         perform { try engine.setTagColor(tagId: tagId, color: color) }
     }
 
+    /// The paper's Markdown note, including typing not yet saved.
+    func note(itemId: String) -> String {
+        if let pendingNote, pendingNote.itemId == itemId { return pendingNote.markdown }
+        do {
+            return try engine.note(itemId: itemId) ?? ""
+        } catch {
+            report(error)
+            return ""
+        }
+    }
+
     /// Debounced; the engine write happens after a short pause in typing.
     func scheduleNoteSave(itemId: String, markdown: String) {
+        // Another paper's unsaved typing is saved first, not dropped.
+        if let pendingNote, pendingNote.itemId != itemId { flushNote() }
         pendingNote = (itemId, markdown)
         noteSaveTimer?.invalidate()
         noteSaveTimer = Timer.scheduledTimer(withTimeInterval: Theme.Duration.noteAutosave, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.flushNote() }
         }
+    }
+
+    /// Saves typing not yet saved and has the inspector read the note again.
+    func reloadNote() {
+        flushNote()
+        noteRevision += 1
     }
 
     func flushNote() {

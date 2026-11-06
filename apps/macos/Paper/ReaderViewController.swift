@@ -15,7 +15,8 @@ import SwiftUI
 /// reader was, and Back returns there. Highlights and sticky notes are stored
 /// by the engine and drawn as `PDFAnnotation`s on the in-memory document.
 /// The PDF's outline is the table of contents in the sidebar, and ⌘F finds
-/// text with PDFKit's search, marking every match on the pages.
+/// text with PDFKit's search, marking every match on the pages. The detail
+/// panel lists the annotations as cards and holds the paper's Markdown note.
 @MainActor
 final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPopoverDelegate {
     let store: LibraryStore
@@ -25,6 +26,8 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
     let paperTitle: String
     /// The table of contents and the pages, shown in the sidebar while this tab is in front.
     let sidebar = ReaderSidebarViewController()
+    /// The annotations and the note, shown in the detail panel while this tab is in front.
+    let panel: ReaderPanelViewController
 
     private let file: AttachmentFile
     private let pdfView = ReaderPDFView()
@@ -77,6 +80,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         self.file = file
         self.attachmentId = file.id
         self.paperTitle = paperTitle
+        panel = ReaderPanelViewController(store: store, itemId: itemId)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -121,6 +125,16 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         sidebar.pages.onSelect = { [weak self] index in
             guard let page = self?.pdfView.document?.page(at: index) else { return }
             self?.go(to: PDFDestination(page: page, at: NSPoint(x: 0, y: kPDFDestinationUnspecifiedValue)))
+        }
+        panel.model.select = { [weak self] id in self?.goToAnnotation(id) }
+        panel.model.saveComment = { [weak self] id, text in
+            guard let self, let annotation = annotations[id] else { return }
+            update(id, patch: AnnotationPatch(color: nil, comment: text), actionName: annotation.kind == .note ? "Edit Note" : "Edit Comment")
+        }
+        panel.model.delete = { [weak self] id in
+            guard let self, let annotation = annotations[id] else { return }
+            if case .highlight(id) = markupTarget { hideMarkupBar() }
+            remove(id, actionName: annotation.kind == .note ? "Delete Note" : "Remove Highlight")
         }
         barModel.addNote = { [weak self] in
             guard let self else { return }
@@ -410,6 +424,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         } else if let (page, point) = pageLocation(of: event, nearest: false),
                   let id = annotationId(of: .highlight, at: point, on: page) {
             showMarkupBar(for: .highlight(id))
+            panel.model.selectedId = id
         }
     }
 
@@ -790,6 +805,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
             popover?.performClose(nil)
         }
         noteEditor = (id, model, popover)
+        panel.model.selectedId = id
         popover.show(relativeTo: pdfView.convert(icon.bounds, from: page), of: pdfView, preferredEdge: .maxX)
     }
 
@@ -823,6 +839,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
     private func remove(_ id: String, actionName: String?) {
         guard let annotation = annotations[id], store.deleteAnnotation(id: id) else { return }
         erase(id)
+        annotationsChanged()
         store.undoManager.registerUndo(withTarget: self) { reader in
             reader.add(NewAnnotation(
                 attachmentId: annotation.attachmentId, kind: annotation.kind, pageIndex: annotation.pageIndex,
@@ -843,8 +860,32 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         store.undoManager.setActionName(actionName)
     }
 
+    /// Scrolls the annotation into view just below the floating controls,
+    /// from its card in the panel. Like a link, Back returns.
+    private func goToAnnotation(_ id: String) {
+        guard let annotation = annotations[id], let page = pdfView.document?.page(at: Int(annotation.pageIndex)) else { return }
+        panel.model.selectedId = id
+        let rect = AnnotationGeometry.cgRect(annotation.rect)
+        // View points, converted to page points at the current zoom.
+        let clearOfBar = (Theme.Size.readerBarInset * 2 + Theme.Toast.height) / pdfView.scaleFactor
+        go(to: PDFDestination(page: page, at: CGPoint(x: kPDFDestinationUnspecifiedValue, y: rect.maxY + clearOfBar)))
+    }
+
+    /// The panel lists the annotations in page order, top to bottom on each
+    /// page, as they are read.
+    private func annotationsChanged() {
+        panel.model.annotations = annotations.values.sorted { first, second in
+            if first.pageIndex != second.pageIndex { return first.pageIndex < second.pageIndex }
+            let (a, b) = (AnnotationGeometry.cgRect(first.rect), AnnotationGeometry.cgRect(second.rect))
+            if a.maxY != b.maxY { return a.maxY > b.maxY }
+            return a.minX < b.minX
+        }
+        if let id = panel.model.selectedId, annotations[id] == nil { panel.model.selectedId = nil }
+    }
+
     private func draw(_ annotation: Annotation) {
         annotations[annotation.id] = annotation
+        defer { annotationsChanged() }
         guard let page = pdfView.document?.page(at: Int(annotation.pageIndex)) else { return }
         let bounds = AnnotationGeometry.cgRect(annotation.rect)
         let shape: PDFAnnotation

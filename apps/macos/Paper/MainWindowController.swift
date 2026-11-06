@@ -8,7 +8,8 @@ import SwiftUI
 /// inspector share one translucent chrome, and the center sits on it too,
 /// showing the paper list or one of the open PDFs, chosen by the tabs in the
 /// toolbar. While a PDF is in front, the sidebar shows its table of contents
-/// instead of the library's lists. Commands are
+/// instead of the library's lists, and the detail panel shows its annotations
+/// and the paper's note instead of the inspector. Commands are
 /// selectors on the responder chain so menu items, toolbar buttons, and
 /// SwiftUI buttons share one code path.
 @MainActor
@@ -20,6 +21,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private let sidebarContent: SidebarContentViewController
     let list: PaperListViewController
     let inspector: InspectorViewController
+    /// The detail panel: the inspector, or the panel of the PDF in front.
+    private let detailContent: TabContentViewController
     private let center: TabContentViewController
     private let tabStrip = TabStripView()
     private let titleView = TitleView()
@@ -54,6 +57,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         sidebarContent = SidebarContentViewController(showing: sidebar)
         list = PaperListViewController(store: store)
         inspector = InspectorViewController(store: store)
+        detailContent = TabContentViewController(showing: inspector, belowToolbar: false)
         center = TabContentViewController(showing: list)
         searchPalette = SearchPaletteController(store: store)
 
@@ -91,7 +95,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         let listItem = NSSplitViewItem(viewController: center)
         listItem.minimumThickness = Theme.Size.listMinWidth
 
-        inspectorItem = NSSplitViewItem(inspectorWithViewController: inspector)
+        inspectorItem = NSSplitViewItem(inspectorWithViewController: detailContent)
         inspectorItem.minimumThickness = Theme.Size.inspectorMinWidth
         inspectorItem.maximumThickness = Theme.Size.inspectorMaxWidth
 
@@ -449,7 +453,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         guard let reader = activeReader else { return }
         reader.savePosition()
         activeReader = nil
+        // So the inspector shows what was typed in the reader's note.
+        store.reloadNote()
         center.show(list, animated: true)
+        detailContent.show(inspector, animated: true)
         sidebarContent.show(sidebar, from: .reader)
         updateTabs()
         showLibraryToolbarItems(true)
@@ -462,6 +469,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         sidebarContent.show(reader.sidebar, from: activeReader == nil ? .library : .reader)
         activeReader = reader
         center.show(reader, animated: true)
+        reader.panel.willShow()
+        detailContent.show(reader.panel, animated: true)
         updateTabs(landing: landing ? reader.itemId : nil)
         showLibraryToolbarItems(false)
         // The inspector follows the paper in front, when the list shows it.
@@ -486,12 +495,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             updateTabs()
         }
         center.remove(reader)
+        detailContent.remove(reader.panel)
         sidebarContent.remove(reader.sidebar)
     }
 
     /// Like `showLibrary`, for when the reader in front has just closed.
     private func showLibraryAfterClosing() {
+        store.reloadNote()
         center.show(list, animated: true)
+        detailContent.show(inspector, animated: true)
         sidebarContent.show(sidebar, from: .reader)
         updateTabs()
         showLibraryToolbarItems(true)
@@ -695,7 +707,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         var settings = store.settings
         let sidebarItem = splitViewController.splitViewItems[0]
         settings.sidebarWidth = sidebarItem.isCollapsed ? settings.sidebarWidth : sidebarContent.view.frame.width
-        settings.detailWidth = inspectorItem.isCollapsed ? settings.detailWidth : inspector.view.frame.width
+        settings.detailWidth = inspectorItem.isCollapsed ? settings.detailWidth : detailContent.view.frame.width
         settings.sidebarCollapsed = sidebarItem.isCollapsed
         settings.detailCollapsed = inspectorItem.isCollapsed
         if let frame = window?.frame {
@@ -716,15 +728,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 /// The center of the window: the paper list or one reader, cross faded when
 /// the tab changes. It sits on the window's chrome with no card of its own,
 /// from under the toolbar to the window's bottom edge and the panels beside it. Readers stay alive
-/// while their tab is open, so switching back keeps the page and zoom.
+/// while their tab is open, so switching back keeps the page and zoom. The
+/// detail panel uses one too, for the inspector or a reader's panel; its
+/// columns reach under the toolbar and keep clear of it with the safe area.
 @MainActor
 final class TabContentViewController: NSViewController {
     private(set) var current: NSViewController
     /// Holds the column in front; its layer runs the tab switch fade.
     private let content = NSView()
+    private let belowToolbar: Bool
 
-    init(showing initial: NSViewController) {
+    init(showing initial: NSViewController, belowToolbar: Bool = true) {
         current = initial
+        self.belowToolbar = belowToolbar
         super.init(nibName: nil, bundle: nil)
         addChild(initial)
     }
@@ -738,7 +754,7 @@ final class TabContentViewController: NSViewController {
         content.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(content)
         NSLayoutConstraint.activate([
-            content.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            content.topAnchor.constraint(equalTo: belowToolbar ? root.safeAreaLayoutGuide.topAnchor : root.topAnchor),
             content.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             content.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             content.bottomAnchor.constraint(equalTo: root.bottomAnchor),

@@ -452,6 +452,10 @@ struct ItemDetailView: View {
                 .onChange(of: note) { _, text in
                     store.scheduleNoteSave(itemId: detail.id, markdown: text)
                 }
+                // The note may have been edited next to the PDF.
+                .onChange(of: store.noteRevision) {
+                    note = store.note(itemId: detail.id)
+                }
         }
         .background(Theme.Color.swiftUICard, in: RoundedRectangle(cornerRadius: Theme.Size.cardRadius, style: .continuous))
     }

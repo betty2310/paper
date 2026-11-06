@@ -134,6 +134,15 @@ enum Theme {
         static let chipRadius: CGFloat = 6
         static let cardRadius: CGFloat = 8
         static let noteMinHeight: CGFloat = 120
+        /// The reader's annotation cards: a color bar at the leading edge,
+        /// the quote cut off after a few lines.
+        static let annotationBarWidth: CGFloat = 3
+        static let annotationCardPadding: CGFloat = 12
+        static let annotationQuoteLines = 6
+        /// TextEditor insets its text by the line fragment padding.
+        static let textEditorInset: CGFloat = 5
+        /// Room for a list's bullet or "10." in the rendered note.
+        static let listMarkerWidth: CGFloat = 16
     }
 
     @MainActor enum Color {
@@ -223,6 +232,13 @@ enum Theme {
         static let swiftUISecondary = SwiftUI.Font.callout
         static let swiftUICaption = SwiftUI.Font.caption
         static let swiftUISectionLabel = SwiftUI.Font.caption.weight(.semibold)
+        /// An annotation's comment, and quotes in the rendered note.
+        static let swiftUIComment = SwiftUI.Font.body.italic()
+        static let swiftUICode = SwiftUI.Font.system(size: 12, design: .monospaced)
+        /// Headings in the rendered note.
+        static let swiftUINoteHeading1 = SwiftUI.Font.system(size: 20, weight: .semibold)
+        static let swiftUINoteHeading2 = SwiftUI.Font.system(size: 16, weight: .semibold)
+        static let swiftUINoteHeading3 = SwiftUI.Font.system(size: 13, weight: .semibold)
         static let swiftUIToastMessage = SwiftUI.Font.system(size: 13, weight: .medium)
         static let swiftUIToastDetail = SwiftUI.Font.system(size: 12).monospacedDigit()
         static let swiftUIToastSubject = SwiftUI.Font.system(size: 12, weight: .regular, design: .serif)
@@ -383,5 +399,8 @@ enum Theme {
         static let findPrevious = "chevron.up"
         static let findNext = "chevron.down"
         static let importPdf = "arrow.down.doc"
+        static let preview = "eye"
+        static let task = "square"
+        static let taskDone = "checkmark.square.fill"
     }
 }
