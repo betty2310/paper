@@ -470,6 +470,10 @@ impl Engine {
         self.0.import_pdf(&path).await
     }
 
+    pub fn create_item(&self, fields: ItemFields) -> Result<ItemRow, PaperError> {
+        self.0.create_item(&fields)
+    }
+
     pub fn update_metadata(&self, id: String, patch: MetadataPatch) -> Result<(), PaperError> {
         self.0.update_metadata(&id, &patch)
     }

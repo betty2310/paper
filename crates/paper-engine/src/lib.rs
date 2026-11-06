@@ -334,23 +334,36 @@ impl Engine {
         }
     }
 
+    /// Adds a paper the user typed in, such as a manuscript that has no DOI
+    /// yet. Only the title is required. Nothing is looked up: the item keeps
+    /// exactly these fields, and `attach_file` gives it a PDF.
+    ///
+    /// Fails with `Duplicate` when the DOI is in the library already.
+    pub fn create_item(&self, fields: &ItemFields) -> Result<ItemRow> {
+        self.ensure_open()?;
+        let mut fields = fields.clone();
+        fields.title = fields.title.trim().to_string();
+        if fields.title.is_empty() {
+            return Err(PaperError::Library {
+                message: "A paper needs a title.".to_string(),
+            });
+        }
+        fields.doi = normalized_doi(fields.doi.as_deref())?;
+        fields.arxiv_id = normalized_arxiv_id(fields.arxiv_id.as_deref())?;
+        let id = self.library.insert_item(&fields, LookupStatus::Done)?;
+        self.notify(|observer| observer.items_changed(vec![id.clone()]));
+        self.library.item_row(&id)
+    }
+
     /// Applies the fields the user edited in the metadata editor.
     pub fn update_metadata(&self, id: &str, patch: &MetadataPatch) -> Result<()> {
         self.ensure_open()?;
         let mut patch = patch.clone();
         if let Some(doi) = patch.doi.as_deref().filter(|doi| !doi.is_empty()) {
-            patch.doi = Some(paper_ids::normalize_doi(doi).ok_or_else(|| {
-                PaperError::InvalidIdentifier {
-                    text: doi.to_string(),
-                }
-            })?);
+            patch.doi = normalized_doi(Some(doi))?;
         }
         if let Some(arxiv) = patch.arxiv_id.as_deref().filter(|id| !id.is_empty()) {
-            patch.arxiv_id = Some(paper_ids::normalize_arxiv_id(arxiv).ok_or_else(|| {
-                PaperError::InvalidIdentifier {
-                    text: arxiv.to_string(),
-                }
-            })?);
+            patch.arxiv_id = normalized_arxiv_id(Some(arxiv))?;
         }
         self.library.update_metadata(id, &patch)?;
         self.notify(|observer| observer.items_changed(vec![id.to_string()]));
@@ -699,6 +712,32 @@ impl Engine {
 
     fn notify(&self, call: impl FnOnce(&dyn EngineObserver)) {
         notify(&self.observer, call);
+    }
+}
+
+/// The canonical form of a DOI the user typed; `None` for nothing typed.
+fn normalized_doi(text: Option<&str>) -> Result<Option<String>> {
+    match text.map(str::trim).filter(|text| !text.is_empty()) {
+        None => Ok(None),
+        Some(text) => {
+            paper_ids::normalize_doi(text)
+                .map(Some)
+                .ok_or_else(|| PaperError::InvalidIdentifier {
+                    text: text.to_string(),
+                })
+        }
+    }
+}
+
+/// The canonical form of an arXiv ID the user typed; `None` for nothing typed.
+fn normalized_arxiv_id(text: Option<&str>) -> Result<Option<String>> {
+    match text.map(str::trim).filter(|text| !text.is_empty()) {
+        None => Ok(None),
+        Some(text) => paper_ids::normalize_arxiv_id(text)
+            .map(Some)
+            .ok_or_else(|| PaperError::InvalidIdentifier {
+                text: text.to_string(),
+            }),
     }
 }
 

@@ -369,6 +369,11 @@ RustBuffer uniffi_paper_ffi_fn_method_engine_create_annotation(uint64_t ptr, Rus
 RustBuffer uniffi_paper_ffi_fn_method_engine_create_collection(uint64_t ptr, RustBuffer name, RustBuffer parent_id, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_CREATE_ITEM
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_CREATE_ITEM
+RustBuffer uniffi_paper_ffi_fn_method_engine_create_item(uint64_t ptr, RustBuffer fields, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_DELETE_ANNOTATION
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_DELETE_ANNOTATION
 void uniffi_paper_ffi_fn_method_engine_delete_annotation(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
@@ -902,6 +907,12 @@ uint16_t uniffi_paper_ffi_checksum_method_engine_create_annotation(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_CREATE_COLLECTION
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_CREATE_COLLECTION
 uint16_t uniffi_paper_ffi_checksum_method_engine_create_collection(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_CREATE_ITEM
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_CREATE_ITEM
+uint16_t uniffi_paper_ffi_checksum_method_engine_create_item(void
     
 );
 #endif

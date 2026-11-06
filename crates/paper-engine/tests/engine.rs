@@ -6,8 +6,8 @@ use std::thread::{self, ThreadId};
 use std::time::{Duration, Instant};
 
 use paper_engine::{
-    Engine, EngineObserver, EngineOptions, Identification, ItemKind, ItemQuery, LookupStatus,
-    MetadataPatch, PaperError, PdfStatus, PdfStep, Scope,
+    Engine, EngineObserver, EngineOptions, Identification, ItemFields, ItemKind, ItemQuery,
+    LookupStatus, MetadataPatch, PaperError, PdfStatus, PdfStep, Scope,
 };
 use paper_fetch::testing::FakeHttp;
 use pollster::block_on;
@@ -961,6 +961,77 @@ fn attached_files_are_copied_and_reading_positions_are_kept() {
     assert_eq!(h.engine.list_items(&unread).unwrap().len(), 0);
     let file = h.engine.attachment_file(&attached.id).unwrap();
     assert_eq!((file.last_page, file.last_zoom), (Some(3), Some(1.5)));
+}
+
+#[test]
+fn a_typed_in_manuscript_needs_only_a_title_and_never_goes_online() {
+    // The app's settings: an added paper would search for a PDF on its own.
+    let h = harness_with(false);
+    let blank = ItemFields {
+        title: "  \n ".into(),
+        ..ItemFields::default()
+    };
+    assert!(matches!(
+        h.engine.create_item(&blank),
+        Err(PaperError::Library { .. })
+    ));
+
+    let draft = ItemFields {
+        title: "  Diffusion for tiny datasets \n".into(),
+        abstract_text: Some("We show it works.".into()),
+        ..ItemFields::default()
+    };
+    let row = h.engine.create_item(&draft).unwrap();
+    assert_eq!(row.title, "Diffusion for tiny datasets");
+    assert_eq!(row.lookup_status, LookupStatus::Done);
+    assert!(!row.has_pdf);
+    assert_eq!(h.events.take(), [Event::Items(vec![row.id.clone()])]);
+    let detail = h.engine.item_detail(&row.id).unwrap();
+    assert_eq!(detail.fields.kind, Some(ItemKind::Other));
+    assert_eq!(
+        detail.fields.abstract_text.as_deref(),
+        Some("We show it works.")
+    );
+    assert_eq!((detail.fields.doi, detail.fields.arxiv_id), (None, None));
+    let no_pdf = ItemQuery {
+        scope: Scope::NoPdf,
+        ..ItemQuery::default()
+    };
+    assert_eq!(h.engine.list_items(&no_pdf).unwrap().len(), 1);
+
+    let pdf = h._dir.path().join("draft.pdf");
+    std::fs::write(&pdf, b"%PDF-1.7 draft").unwrap();
+    block_on(h.engine.attach_file(&row.id, pdf.to_str().unwrap())).unwrap();
+    assert!(h.engine.list_items(&no_pdf).unwrap().is_empty());
+    assert!(
+        h.http.requests().is_empty(),
+        "no lookup and no PDF search for a typed-in paper"
+    );
+
+    // Identifiers typed in are normalized and checked like edited ones.
+    let published = ItemFields {
+        title: "Deep learning".into(),
+        doi: Some(" https://doi.org/10.1038/NATURE14539 ".into()),
+        arxiv_id: Some(String::new()),
+        ..ItemFields::default()
+    };
+    let row = h.engine.create_item(&published).unwrap();
+    assert_eq!(row.doi.as_deref(), Some("10.1038/nature14539"));
+    assert_eq!(h.engine.item_detail(&row.id).unwrap().fields.arxiv_id, None);
+    assert!(matches!(
+        h.engine.create_item(&published),
+        Err(PaperError::Duplicate { item_id, .. }) if item_id == row.id
+    ));
+    let bad = ItemFields {
+        title: "Bad".into(),
+        doi: Some("not a doi".into()),
+        ..ItemFields::default()
+    };
+    assert!(matches!(
+        h.engine.create_item(&bad),
+        Err(PaperError::InvalidIdentifier { .. })
+    ));
+    assert!(h.http.requests().is_empty());
 }
 
 // ----- import_pdf -----

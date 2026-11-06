@@ -670,6 +670,8 @@ public protocol EngineProtocol: AnyObject, Sendable {
     
     func createCollection(name: String, parentId: String?) throws  -> String
     
+    func createItem(fields: ItemFields) throws  -> ItemRow
+    
     func deleteAnnotation(id: String) throws 
     
     func deleteCollection(id: String) throws 
@@ -897,6 +899,16 @@ open func createCollection(name: String, parentId: String?)throws  -> String  {
             self.uniffiCloneHandle(),
         FfiConverterString.lower(name),
         FfiConverterOptionString.lower(parentId),uniffiCallStatus
+    )
+})
+}
+    
+open func createItem(fields: ItemFields)throws  -> ItemRow  {
+    return try  FfiConverterTypeItemRow_lift(try rustCallWithError(FfiConverterTypePaperError_lift) {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engine_create_item(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeItemFields_lower(fields),uniffiCallStatus
     )
 })
 }
@@ -4469,6 +4481,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_create_collection() != 10216) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paper_ffi_checksum_method_engine_create_item() != 36575) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_delete_annotation() != 44460) {
