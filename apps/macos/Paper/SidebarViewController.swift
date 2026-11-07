@@ -48,6 +48,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private var collapsedIds: Set<String> = []
     private var subscriptions: Set<AnyCancellable> = []
     private var suppressSelectionChange = false
+    /// The context menu's color items, shown for a tag.
+    private var colorItems: [NSMenuItem] = []
 
     init(store: LibraryStore) {
         self.store = store
@@ -297,8 +299,30 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         menu.addItem(.separator())
         menu.addItem(withTitle: "Rename", action: #selector(renameClicked(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Delete Collection", action: #selector(deleteCollectionClicked(_:)), keyEquivalent: "")
+        colorItems = [NSMenuItem.sectionHeader(title: "Color")]
+        for swatch in Theme.TagColor.swatches {
+            let item = NSMenuItem(title: swatch.name, action: #selector(tagColorClicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = swatch.hex
+            item.image = NSImage(size: NSSize(width: Theme.Size.iconSize, height: Theme.Size.iconSize), flipped: false) { rect in
+                swatch.color.setFill()
+                let inset = (Theme.Size.iconSize - Theme.Size.tagDotSize) / 2
+                NSBezierPath(ovalIn: rect.insetBy(dx: inset, dy: inset)).fill()
+                return true
+            }
+            colorItems.append(item)
+        }
+        colorItems.forEach(menu.addItem)
         menu.delegate = self
         return menu
+    }
+
+    @objc private func tagColorClicked(_ sender: NSMenuItem) {
+        guard let node = outlineView.item(atRow: outlineView.clickedRow) as? Node,
+              case .tag(let tag) = node.kind,
+              let hex = sender.representedObject as? String
+        else { return }
+        store.setTagColor(tagId: tag.id, color: hex)
     }
 
     func controlTextDidEndEditing(_ notification: Notification) {
@@ -433,12 +457,24 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 extension SidebarViewController: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         let row = outlineView.clickedRow
-        let isCollection: Bool = {
-            guard row >= 0, case .collection? = (outlineView.item(atRow: row) as? Node)?.kind else { return false }
-            return true
-        }()
-        for item in menu.items where item.action != #selector(MainWindowController.newCollection(_:)) {
-            item.isHidden = !isCollection
+        let kind = row >= 0 ? (outlineView.item(atRow: row) as? Node)?.kind : nil
+        var isCollection = false
+        var tag: Tag?
+        switch kind {
+        case .collection?: isCollection = true
+        case .tag(let clicked)?: tag = clicked
+        default: break
+        }
+        for item in menu.items {
+            if colorItems.contains(item) {
+                item.isHidden = tag == nil
+                let hex = item.representedObject as? String
+                item.state = hex?.caseInsensitiveCompare(tag?.color ?? "") == .orderedSame ? .on : .off
+            } else if item.action == #selector(MainWindowController.newCollection(_:)) {
+                item.isHidden = tag != nil
+            } else {
+                item.isHidden = !isCollection
+            }
         }
     }
 }

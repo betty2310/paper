@@ -57,7 +57,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         sidebarContent = SidebarContentViewController(showing: sidebar)
         list = PaperListViewController(store: store)
         inspector = InspectorViewController(store: store)
-        detailContent = TabContentViewController(showing: inspector, belowToolbar: false)
+        detailContent = TabContentViewController(showing: inspector)
         center = TabContentViewController(showing: list)
         searchPalette = SearchPaletteController(store: store)
 
@@ -827,18 +827,18 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 /// the tab changes. It sits on the window's chrome with no card of its own,
 /// from under the toolbar to the window's bottom edge and the panels beside it. Readers stay alive
 /// while their tab is open, so switching back keeps the page and zoom. The
-/// detail panel uses one too, for the inspector or a reader's panel; its
-/// columns reach under the toolbar and keep clear of it with the safe area.
+/// detail panel uses one too, for the inspector or a reader's panel. Both
+/// start below the toolbar: a SwiftUI panel that reached under it and kept
+/// clear with the safe area took clicks and hover one toolbar height above
+/// where it drew.
 @MainActor
 final class TabContentViewController: NSViewController {
     private(set) var current: NSViewController
     /// Holds the column in front; its layer runs the tab switch fade.
     private let content = NSView()
-    private let belowToolbar: Bool
 
-    init(showing initial: NSViewController, belowToolbar: Bool = true) {
+    init(showing initial: NSViewController) {
         current = initial
-        self.belowToolbar = belowToolbar
         super.init(nibName: nil, bundle: nil)
         addChild(initial)
     }
@@ -852,7 +852,7 @@ final class TabContentViewController: NSViewController {
         content.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(content)
         NSLayoutConstraint.activate([
-            content.topAnchor.constraint(equalTo: belowToolbar ? root.safeAreaLayoutGuide.topAnchor : root.topAnchor),
+            content.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
             content.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             content.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             content.bottomAnchor.constraint(equalTo: root.bottomAnchor),

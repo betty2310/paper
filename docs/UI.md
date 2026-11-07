@@ -28,7 +28,7 @@ The toolbar draws no background or separator of its own. It holds the sidebar to
 
 ### Sidebar
 
-Three groups with 11 px uppercase letter spaced labels: LIBRARY (All papers, Unread, Recently added, No PDF), COLLECTIONS (a tree with disclosure chevrons and folder icons, a "+" at the group label), and TAGS (color dot and name, a "+" at the group label). Rows are 36 px tall with 16 px left padding plus 24 px per nesting level. The selected row has the accent tint background and accent text. The bottom of the sidebar shows the library path in muted text with a switch icon that opens the library chooser.
+Three groups with 11 px uppercase letter spaced labels: LIBRARY (All papers, Unread, Recently added, No PDF), COLLECTIONS (a tree with disclosure chevrons and folder icons, a "+" at the group label), and TAGS (color dot and name, a "+" at the group label; a tag's context menu lists the tag colors with a checkmark on its own and changes it). Rows are 36 px tall with 16 px left padding plus 24 px per nesting level. The selected row has the accent tint background and accent text. The bottom of the sidebar shows the library path in muted text with a switch icon that opens the library chooser.
 
 ### Library tab
 
@@ -38,7 +38,7 @@ Dragging PDFs from Finder over the paper list covers it with an 8 px inset accen
 
 ### Detail panel
 
-The selected paper's title in 22 px serif, authors in 15 px sans, venue line "NeurIPS · 2020 · 33(1)" in muted sans, the DOI as an accent colored link with an external link icon, then a row of two buttons: "Copy BibTeX" and "Cite" (copies the APA reference, as rich text with its italics and as plain text). The PDF is opened from its row in the PDF section. Below are collapsible sections with uppercase labels and hairline dividers: ABSTRACT, ATTACHMENTS (file rows with size), TAGS (chips plus a "+" chip), and NOTES (a quiet card that opens the note editor on click). A "⋯" menu at the end of the button row holds Copy DOI, Copy Citation Key, Export BibTeX…, Edit Metadata…, Open Publisher Page, Retry Lookup, Attach PDF…, Reveal PDF in Finder, and Delete. The DETAILS section lists the paper's citation key, and the metadata editor has a Citation key field; clearing it makes a new key from the metadata. With several papers selected, the panel offers Copy BibTeX, Cite, Export BibTeX…, and Delete for all of them.
+The selected paper's title in 22 px serif, authors in 15 px sans, venue line "NeurIPS · 2020 · 33(1)" in muted sans, the DOI as an accent colored link with an external link icon, then a row of two buttons: "Copy BibTeX" and "Cite" (copies the APA reference, as rich text with its italics and as plain text). The PDF is opened from its row in the PDF section. Below are collapsible sections with uppercase labels and hairline dividers: ABSTRACT, ATTACHMENTS (file rows with size), TAGS (chips plus a "+" chip; each chip is filled with its tag's color at 16% behind the name, which is set in the same color made 45% darker in Light Mode and 35% lighter in Dark Mode so every color reads as text, and its dot opens a popover with the tag colors as 16 px dots, the current one ringed in the accent color), and NOTES (a quiet card that opens the note editor on click). A "⋯" menu at the end of the button row holds Copy DOI, Copy Citation Key, Export BibTeX…, Edit Metadata…, Open Publisher Page, Retry Lookup, Attach PDF…, Reveal PDF in Finder, and Delete. The DETAILS section lists the paper's citation key, and the metadata editor has a Citation key field; clearing it makes a new key from the metadata. With several papers selected, the panel offers Copy BibTeX, Cite, Export BibTeX…, and Delete for all of them.
 
 The citation commands act on the list's selection, or on the paper in front while a PDF tab is. They are in the Paper menu (Copy BibTeX, Copy APA Citation, Copy Citation Key), in the paper list's context menu with Export BibTeX…, and Export BibTeX… is in the File menu. A collection's context menu in the sidebar exports the papers directly in it to a .bib file named after the collection; a single paper's file is named after its key. Each copy or export confirms with a toast, and an export's toast has Show to reveal the file in Finder.
 
@@ -100,6 +100,16 @@ Light theme is the default and the only theme in the MVP. A dark theme uses the 
 | highlight.pink | #F7C6D0 | |
 | highlight.purple | #DCCBEE | |
 | danger | #B4473A | delete confirmations |
+| tag.red | #D25F55 | |
+| tag.orange | #DE8A3E | |
+| tag.yellow | #D9AE36 | |
+| tag.green | #67A55A | |
+| tag.teal | #3E9A92 | |
+| tag.blue | #4F87C9 | |
+| tag.purple | #8C6CC6 | |
+| tag.pink | #D3699A | |
+
+The tag colors are the highlight hues plus red, orange, and teal, deep enough that a 10 px dot stands out in Light and Dark Mode. A new tag gets the tag color that the fewest tags have, so tags look different without the user picking; ties go through the palette in steps of three (red, green, purple, orange, teal, pink, yellow, blue), so the first tags are far apart in hue. Tags made before tags had colors get theirs the same way when the library opens. The user changes a tag's color from its context menu in the sidebar or from the dot on its chip in the detail panel, and the color shows everywhere the tag does. Colors are stored by hex with the tag, so a tag keeps its color across launches, and removing a tag from its last paper deletes it with its color.
 
 ## Spacing and shape
 

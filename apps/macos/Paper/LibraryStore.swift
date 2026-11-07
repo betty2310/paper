@@ -55,6 +55,8 @@ final class LibraryStore: ObservableObject {
         })
         reloadItems()
         reloadCollections()
+        // Tags made before tags had colors get theirs now.
+        try? colorNewTags()
         reloadTags()
     }
 
@@ -485,7 +487,26 @@ final class LibraryStore: ObservableObject {
     }
 
     func setTags(itemId: String, names: [String]) {
-        perform { try engine.setTags(itemId: itemId, names: names) }
+        perform {
+            try engine.setTags(itemId: itemId, names: names)
+            try colorNewTags()
+        }
+    }
+
+    /// Gives each tag without a color the palette color fewest tags have, so
+    /// tags look different without the user picking.
+    private func colorNewTags() throws {
+        let tags = try engine.tags()
+        let swatches = Theme.TagColor.swatches
+        var uses = swatches.map { swatch in
+            tags.filter { $0.color?.caseInsensitiveCompare(swatch.hex) == .orderedSame }.count
+        }
+        let order = swatches.indices.map { $0 * Theme.TagColor.assignStep % swatches.count }
+        for tag in tags where tag.color == nil {
+            let index = order.min { uses[$0] < uses[$1] }!
+            try engine.setTagColor(tagId: tag.id, color: swatches[index].hex)
+            uses[index] += 1
+        }
     }
 
     func isFavorite(itemId: String) -> Bool {

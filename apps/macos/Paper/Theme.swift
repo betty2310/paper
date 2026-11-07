@@ -71,6 +71,8 @@ enum Theme {
         static let sidebarBadgeMinWidth: CGFloat = 20
         static let sidebarFooterHeight: CGFloat = 36
         static let tagDotSize: CGFloat = 10
+        /// The dot inside a tag chip, which opens the tag's colors.
+        static let tagChipDotSize: CGFloat = 8
 
         static let popoverWidth: CGFloat = 360
         static let welcomeWidth: CGFloat = 520
@@ -179,7 +181,7 @@ enum Theme {
         static let filterBarBackground = NSColor.windowBackgroundColor
         static let warning = NSColor.systemOrange
         static let danger = NSColor.systemRed
-        /// The tag color when the user never picked one.
+        /// A tag whose stored color is not one `NSColor(hexString:)` reads.
         static let defaultTag = NSColor.systemGray
 
         static let swiftUIText = SwiftUI.Color(nsColor: text)
@@ -316,16 +318,18 @@ enum Theme {
         static let readingPositionSave: TimeInterval = 1
     }
 
+    /// A named color stored by hex in the library.
+    struct Swatch: Identifiable, Hashable {
+        let name: String
+        let hex: String
+        var id: String { hex }
+        var color: NSColor { NSColor(hexString: hex)! }
+        var swiftUIColor: SwiftUI.Color { SwiftUI.Color(nsColor: color) }
+    }
+
     /// Highlight and note colors, stored by hex in the library. Pastels that
     /// keep black text readable under PDFKit's multiply blending.
     enum Markup {
-        struct Swatch: Identifiable, Hashable {
-            let name: String
-            let hex: String
-            var id: String { hex }
-            var color: NSColor { NSColor(hexString: hex)! }
-        }
-
         static let swatches = [
             Swatch(name: "Yellow", hex: "#FFE58A"),
             Swatch(name: "Green", hex: "#CFE8B8"),
@@ -342,6 +346,41 @@ enum Theme {
         static let shadowRadius: CGFloat = 8
         static let shadowY: CGFloat = 2
         static let pressedScale: CGFloat = 0.88
+    }
+
+    /// Tag colors, stored by hex in the library. The highlight hues plus red,
+    /// orange, and teal, deep enough that a 10 px dot stands out on the
+    /// sidebar in Light and Dark Mode. In hue order, as the pickers show them.
+    enum TagColor {
+        static let swatches = [
+            Swatch(name: "Red", hex: "#D25F55"),
+            Swatch(name: "Orange", hex: "#DE8A3E"),
+            Swatch(name: "Yellow", hex: "#D9AE36"),
+            Swatch(name: "Green", hex: "#67A55A"),
+            Swatch(name: "Teal", hex: "#3E9A92"),
+            Swatch(name: "Blue", hex: "#4F87C9"),
+            Swatch(name: "Purple", hex: "#8C6CC6"),
+            Swatch(name: "Pink", hex: "#D3699A"),
+        ]
+        /// A new tag takes the color fewest tags have. Ties go in steps of
+        /// this many swatches (red, green, purple, orange, teal, pink,
+        /// yellow, blue), so the first tags are far apart in hue.
+        static let assignStep = 3
+        /// The chip's fill behind its name, light enough that the text keeps its color.
+        static let chipOpacity: Double = 0.16
+        /// How far a chip's name moves from its tag color toward black in
+        /// Light Mode, or toward white in Dark Mode, so even yellow reads.
+        static let chipTextShade: CGFloat = 0.45
+        static let chipTextTint: CGFloat = 0.35
+
+        /// A tag's name on its chip: the tag color, deep enough for text.
+        static func chipText(_ color: NSColor) -> NSColor {
+            NSColor(name: nil) { appearance in
+                appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                    ? color.blended(withFraction: chipTextTint, of: .white) ?? color
+                    : color.blended(withFraction: chipTextShade, of: .black) ?? color
+            }
+        }
     }
 
     /// Paper previews: figures sit on white like the page they came from, and

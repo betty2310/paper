@@ -457,7 +457,9 @@ struct ItemDetailView: View {
     private var tags: some View {
         FlowLayout(spacing: Theme.Size.gap - Theme.Size.smallGap) {
             ForEach(detail.tags, id: \.id) { tag in
-                TagChip(tag: tag) {
+                TagChip(tag: tag) { color in
+                    store.setTagColor(tagId: tag.id, color: color)
+                } remove: {
                     store.setTags(itemId: detail.id, names: detail.tags.filter { $0.id != tag.id }.map(\.name))
                 }
             }
@@ -584,17 +586,31 @@ struct ItemDetailView: View {
     }()
 }
 
+/// A tag on the paper, tinted with its color. The dot opens the tag colors;
+/// the cross takes the tag off the paper.
 struct TagChip: View {
     let tag: Tag
+    let recolor: (String) -> Void
     let remove: () -> Void
+    @State private var picking = false
+
+    private var tagColor: NSColor {
+        NSColor(hexString: tag.color) ?? Theme.Color.defaultTag
+    }
+
+    private var color: Color { Color(nsColor: tagColor) }
 
     var body: some View {
         HStack(spacing: Theme.Size.smallGap) {
-            Circle()
-                .fill(Color(nsColor: NSColor(hexString: tag.color) ?? Theme.Color.defaultTag))
-                .frame(width: Theme.Size.tagDotSize - 2, height: Theme.Size.tagDotSize - 2)
+            Button { picking = true } label: { EmptyView() }
+                .buttonStyle(ColorDotStyle(color: color, selected: false, size: Theme.Size.tagChipDotSize,
+                                           target: Theme.Size.tagChipDotSize + Theme.Size.markupRingWidth * 2))
+                .focusEffectDisabled()
+                .help("Change the color of “\(tag.name)”")
+                .accessibilityLabel("Color of tag \(tag.name)")
             Text(tag.name)
                 .font(Theme.Font.swiftUISecondary)
+                .foregroundStyle(Color(nsColor: Theme.TagColor.chipText(tagColor)))
             Button(action: remove) {
                 Image(systemName: Theme.Symbol.close)
                     .font(.system(size: 9, weight: .bold))
@@ -605,7 +621,41 @@ struct TagChip: View {
         }
         .padding(.horizontal, Theme.Size.gap)
         .padding(.vertical, Theme.Size.smallGap)
-        .background(Theme.Color.swiftUICard, in: Capsule())
+        .background(color.opacity(Theme.TagColor.chipOpacity), in: Capsule())
+        .popover(isPresented: $picking, arrowEdge: .bottom) {
+            TagColorPicker(current: tag.color) { hex in
+                picking = false
+                recolor(hex)
+            }
+        }
+    }
+}
+
+/// The tag colors as a row of dots, the current one ringed. Keyboard focus
+/// starts on the current color, so the ring never marks another.
+struct TagColorPicker: View {
+    let current: String?
+    let pick: (String) -> Void
+    @FocusState private var focused: String?
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Theme.TagColor.swatches) { swatch in
+                Button { pick(swatch.hex) } label: { EmptyView() }
+                    .buttonStyle(ColorDotStyle(color: swatch.swiftUIColor, selected: isCurrent(swatch)))
+                    .focused($focused, equals: swatch.hex)
+                    .help("Make \(swatch.name.lowercased())")
+                    .accessibilityLabel(swatch.name)
+                    .accessibilityAddTraits(isCurrent(swatch) ? .isSelected : [])
+            }
+        }
+        .focusEffectDisabled()
+        .padding(Theme.Size.markupBarPadding)
+        .onAppear { focused = Theme.TagColor.swatches.first(where: isCurrent)?.hex }
+    }
+
+    private func isCurrent(_ swatch: Theme.Swatch) -> Bool {
+        current?.caseInsensitiveCompare(swatch.hex) == .orderedSame
     }
 }
 

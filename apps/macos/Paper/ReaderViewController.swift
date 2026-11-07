@@ -523,7 +523,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         return (text.substring(with: before), text.substring(with: after))
     }
 
-    private func pick(_ swatch: Theme.Markup.Swatch) {
+    private func pick(_ swatch: Theme.Swatch) {
         switch markupTarget {
         case .selection:
             highlightSelection(color: swatch.hex)

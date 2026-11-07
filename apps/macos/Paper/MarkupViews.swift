@@ -12,7 +12,7 @@ final class MarkupBarModel: ObservableObject {
     }
 
     @Published var mode: Mode = .selection
-    var pick: (Theme.Markup.Swatch) -> Void = { _ in }
+    var pick: (Theme.Swatch) -> Void = { _ in }
     var copy: () -> Void = {}
     var delete: () -> Void = {}
 }
@@ -25,7 +25,7 @@ struct MarkupBar: View {
         HStack(spacing: 0) {
             ForEach(Theme.Markup.swatches) { swatch in
                 Button { model.pick(swatch) } label: { EmptyView() }
-                    .buttonStyle(MarkupDotStyle(color: SwiftUI.Color(nsColor: swatch.color), selected: isCurrent(swatch)))
+                    .buttonStyle(ColorDotStyle(color: swatch.swiftUIColor, selected: isCurrent(swatch)))
                     .help(model.mode == .selection ? "Highlight in \(swatch.name.lowercased())" : "Make \(swatch.name.lowercased())")
                     .accessibilityLabel(model.mode == .selection ? "Highlight \(swatch.name)" : swatch.name)
             }
@@ -56,7 +56,7 @@ struct MarkupBar: View {
         .fixedSize()
     }
 
-    private func isCurrent(_ swatch: Theme.Markup.Swatch) -> Bool {
+    private func isCurrent(_ swatch: Theme.Swatch) -> Bool {
         if case .highlight(let color) = model.mode { return color.caseInsensitiveCompare(swatch.hex) == .orderedSame }
         return false
     }
@@ -327,19 +327,24 @@ private struct ReaderCapsule: ViewModifier {
 // MARK: Styles
 
 /// A color dot: a ring on hover, an accent ring for the current color or
-/// keyboard focus, and a small press.
-private struct MarkupDotStyle: ButtonStyle {
+/// keyboard focus, and a small press. The markup toolbar's and the tag
+/// colors' dots sit in a larger hit area; a tag chip's dot fits its line.
+struct ColorDotStyle: ButtonStyle {
     let color: SwiftUI.Color
     let selected: Bool
+    var size = Theme.Size.markupDotSize
+    var target = Theme.Size.markupDotTarget
 
     func makeBody(configuration: Configuration) -> some View {
-        DotBody(configuration: configuration, color: color, selected: selected)
+        DotBody(configuration: configuration, color: color, selected: selected, size: size, target: target)
     }
 
     private struct DotBody: View {
         let configuration: ButtonStyleConfiguration
         let color: SwiftUI.Color
         let selected: Bool
+        let size: CGFloat
+        let target: CGFloat
         @State private var hovering = false
         @Environment(\.isEnabled) private var isEnabled
         @Environment(\.isFocused) private var isFocused
@@ -348,11 +353,11 @@ private struct MarkupDotStyle: ButtonStyle {
             Circle()
                 .fill(color)
                 .overlay(Circle().strokeBorder(Theme.Color.swiftUISeparator, lineWidth: 1))
-                .frame(width: Theme.Size.markupDotSize, height: Theme.Size.markupDotSize)
+                .frame(width: size, height: size)
                 .padding(Theme.Size.markupRingWidth)
                 .overlay(Circle().strokeBorder(ring, lineWidth: Theme.Size.markupRingWidth))
                 .scaleEffect(configuration.isPressed ? Theme.Markup.pressedScale : 1)
-                .frame(width: Theme.Size.markupDotTarget, height: Theme.Size.markupDotTarget)
+                .frame(width: target, height: target)
                 .contentShape(Rectangle())
                 .opacity(isEnabled ? 1 : Theme.Toast.disabledOpacity)
                 .onHover { hovering = $0 }
