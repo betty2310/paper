@@ -144,6 +144,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
         tabStrip.onSelect = { [weak self] id in self?.selectTab(id) }
         tabStrip.onClose = { [weak self] id in self?.closeReader(itemId: id) }
+        tabStrip.onTogglePin = { [weak self] id in self?.togglePin(itemId: id) }
         list.onOpen = { [weak self] itemId in self?.openPaper(itemId: itemId) }
         store.openPaper = { [weak self] itemId in self?.openPaper(itemId: itemId) }
         // Picking a list in the sidebar is about the library, so it comes forward.
@@ -206,6 +207,58 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
                 DispatchQueue.main.async { self?.savePanelsShown() }
             }
         }
+        restorePinnedTabs()
+    }
+
+    // MARK: Pinned tabs
+
+    /// Item ids of the pinned tabs, in tab order. Pinned readers come first
+    /// in `readers` in this order.
+    private var pinnedIds: [String] = []
+
+    /// Reopens the tabs pinned at the last launch, behind the library, in
+    /// their order. A paper deleted since, or whose PDF is gone, is dropped.
+    private func restorePinnedTabs() {
+        let saved = store.pinnedTabs
+        for itemId in saved where !pinnedIds.contains(itemId) {
+            guard let reader = makeReader(itemId: itemId) else { continue }
+            pinnedIds.append(itemId)
+            readers.insert(reader, at: pinnedIds.count - 1)
+            Task { await reader.open() }
+        }
+        if pinnedIds != saved { store.setPinnedTabs(pinnedIds) }
+        updateTabs()
+    }
+
+    @objc func togglePinTab(_ sender: Any?) {
+        guard let reader = activeReader else { return }
+        togglePin(itemId: reader.itemId)
+    }
+
+    /// Pins a tab at the end of the pinned tabs, or unpins it to just after
+    /// them, and saves the pins at once.
+    private func togglePin(itemId: String) {
+        guard let index = readers.firstIndex(where: { $0.itemId == itemId }) else { return }
+        let reader = readers.remove(at: index)
+        if let pinned = pinnedIds.firstIndex(of: itemId) {
+            pinnedIds.remove(at: pinned)
+        } else {
+            pinnedIds.append(itemId)
+        }
+        readers.insert(reader, at: pinnedIds.count - (pinnedIds.contains(itemId) ? 1 : 0))
+        store.setPinnedTabs(pinnedIds)
+        updateTabs()
+    }
+
+    // MARK: Favorites
+
+    /// The paper in front, or the selected papers in the library (⌘D).
+    private var favoriteTargets: [String] {
+        activeReader.map { [$0.itemId] } ?? store.selectedItemIds
+    }
+
+    @objc func toggleFavorite(_ sender: Any?) {
+        store.toggleFavorite(itemIds: favoriteTargets)
     }
 
     private var panelObservers: [NSKeyValueObservation] = []
@@ -358,6 +411,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             return activeReader?.canGoForward ?? false
         case #selector(highlightSelection(_:)):
             return activeReader?.canHighlight ?? false
+        case #selector(toggleFavorite(_:)):
+            let ids = favoriteTargets
+            let all = !ids.isEmpty && ids.allSatisfy(store.isFavorite(itemId:))
+            menuItem.title = all ? "Remove from Favorites" : "Add to Favorites"
+            return !ids.isEmpty
+        case #selector(togglePinTab(_:)):
+            menuItem.title = activeReader.map { pinnedIds.contains($0.itemId) } == true ? "Unpin Tab" : "Pin Tab"
+            return activeReader != nil
         case #selector(showNextTab(_:)), #selector(showPreviousTab(_:)):
             return !readers.isEmpty
         case #selector(findPdf(_:)):
@@ -392,19 +453,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             activate(reader)
             return
         }
-        guard let attachment = store.pdfAttachment(itemId: itemId) else {
+        guard store.pdfAttachment(itemId: itemId) != nil else {
             openWhenReady(itemId: itemId)
             return
         }
-        let file: AttachmentFile
-        do {
-            file = try store.attachmentFile(id: attachment.id)
-        } catch {
-            store.report(error)
-            return
-        }
-        let title = (try? store.engine.itemDetail(id: itemId))?.fields.title ?? URL(fileURLWithPath: file.path).deletingPathExtension().lastPathComponent
-        let reader = ReaderViewController(store: store, itemId: itemId, file: file, paperTitle: title)
+        guard let reader = makeReader(itemId: itemId, reportingErrors: true) else { return }
         // The row's picture is taken now, before anything moves.
         let flight = activeReader == nil ? list.flightSource(itemId: itemId) : nil
         readers.append(reader)
@@ -421,6 +474,20 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
                 }
             }
         }
+    }
+
+    /// A reader for the paper's PDF, not yet opened, or nil when it has none.
+    private func makeReader(itemId: String, reportingErrors: Bool = false) -> ReaderViewController? {
+        guard let attachment = store.pdfAttachment(itemId: itemId) else { return nil }
+        let file: AttachmentFile
+        do {
+            file = try store.attachmentFile(id: attachment.id)
+        } catch {
+            if reportingErrors { store.report(error) }
+            return nil
+        }
+        let title = (try? store.engine.itemDetail(id: itemId))?.fields.title ?? URL(fileURLWithPath: file.path).deletingPathExtension().lastPathComponent
+        return ReaderViewController(store: store, itemId: itemId, file: file, paperTitle: title)
     }
 
     /// The paper's toast shows the search; the tab opens when the PDF arrives.
@@ -489,6 +556,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         guard let index = readers.firstIndex(where: { $0.itemId == itemId }) else { return }
         let reader = readers.remove(at: index)
         reader.close()
+        if let pinned = pinnedIds.firstIndex(of: itemId) {
+            pinnedIds.remove(at: pinned)
+            store.setPinnedTabs(pinnedIds)
+        }
         if activeReader === reader {
             activeReader = nil
             if readers.isEmpty {
@@ -525,7 +596,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     /// toolbar item never takes space or draws.
     private func updateTabs(landing: String? = nil) {
         let tabs = readers.isEmpty ? [] : [TabStripView.Tab(id: TabStripView.Tab.libraryId, title: "Library")]
-            + readers.map { TabStripView.Tab(id: $0.itemId, title: $0.paperTitle) }
+            + readers.map { TabStripView.Tab(id: $0.itemId, title: $0.paperTitle, isPinned: pinnedIds.contains($0.itemId)) }
         guard let toolbar = window?.toolbar else { return }
         let index = toolbar.items.firstIndex { $0.itemIdentifier == ToolbarID.tabs }
         if !tabs.isEmpty, index == nil,

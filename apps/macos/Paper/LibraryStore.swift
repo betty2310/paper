@@ -488,6 +488,18 @@ final class LibraryStore: ObservableObject {
         perform { try engine.setTags(itemId: itemId, names: names) }
     }
 
+    func isFavorite(itemId: String) -> Bool {
+        items.first { $0.id == itemId }?.favorite ?? false
+    }
+
+    /// Marks the papers as favorites, or clears the mark when all of them
+    /// are favorites already, the way Finder toggles a tag on a selection.
+    func toggleFavorite(itemIds: [String]) {
+        guard !itemIds.isEmpty else { return }
+        let favorite = !itemIds.allSatisfy(isFavorite(itemId:))
+        perform { try engine.setFavorite(itemIds: itemIds, favorite: favorite) }
+    }
+
     func setTagColor(tagId: String, color: String?) {
         perform { try engine.setTagColor(tagId: tagId, color: color) }
     }
@@ -649,6 +661,13 @@ final class LibraryStore: ObservableObject {
 
     func updateSettings(_ settings: Settings) {
         perform { try engine.updateSettings(settings: settings) }
+    }
+
+    /// The item ids of this library's pinned tabs, in tab order.
+    var pinnedTabs: [String] { engine.pinnedTabs() }
+
+    func setPinnedTabs(_ itemIds: [String]) {
+        perform { try engine.setPinnedTabs(itemIds: itemIds) }
     }
 
     func close() {

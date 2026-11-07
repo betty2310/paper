@@ -50,11 +50,11 @@ A manuscript the user is writing has no DOI yet. File > New Paper Without DOI (â
 
 ### Organize
 
-The sidebar lists collections. Collections can be nested, and one paper can be in several collections. The main list shows the papers of the selected collection with sortable columns (title, first author, journal, year, date added). Items can have tags. A search box filters the list by title, author, journal, tag, and note text as the user types.
+The sidebar lists collections. Collections can be nested, and one paper can be in several collections. The main list shows the papers of the selected collection with sortable columns (title, first author, journal, year, date added). Items can have tags. The user can mark papers as favorites, and favorites are listed above the other papers in every list whatever the sort. A search box filters the list by title, author, journal, tag, and note text as the user types.
 
 ### Read
 
-Double clicking a paper opens its PDF in a tab in the same window. The viewer scrolls continuously through all pages, supports zoom (fit width, fit page, and percentages), page navigation, the document outline, an in-document text search with highlighted results, and clickable links. Several PDFs can be open in tabs at the same time.
+Double clicking a paper opens its PDF in a tab in the same window. The viewer scrolls continuously through all pages, supports zoom (fit width, fit page, and percentages), page navigation, the document outline, an in-document text search with highlighted results, and clickable links. Several PDFs can be open in tabs at the same time. A tab can be pinned, which keeps it at the start of the tabs and reopens it at the next launch.
 
 ### Annotate
 

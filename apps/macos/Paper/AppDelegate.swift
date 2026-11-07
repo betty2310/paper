@@ -304,6 +304,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         citationItem.keyEquivalentModifierMask = [.command, .shift]
         paperMenu.addItem(withTitle: "Copy Citation Key", action: #selector(MainWindowController.copyCitationKey(_:)), keyEquivalent: "")
         paperMenu.addItem(.separator())
+        paperMenu.addItem(withTitle: "Add to Favorites", action: #selector(MainWindowController.toggleFavorite(_:)), keyEquivalent: "d")
+        paperMenu.addItem(.separator())
         paperMenu.addItem(withTitle: "Copy DOI", action: #selector(PaperListViewController.copyDOI(_:)), keyEquivalent: "")
         paperMenu.addItem(withTitle: "Open Publisher Page", action: #selector(PaperListViewController.openPublisherPage(_:)), keyEquivalent: "")
         paperMenu.addItem(withTitle: "Retry Lookup", action: #selector(PaperListViewController.retryLookup(_:)), keyEquivalent: "")
@@ -343,6 +345,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         windowMenu.addItem(.separator())
+        windowMenu.addItem(withTitle: "Pin Tab", action: #selector(MainWindowController.togglePinTab(_:)), keyEquivalent: "")
         windowMenu.addItem(withTitle: "Show Previous Tab", action: #selector(MainWindowController.showPreviousTab(_:)), keyEquivalent: "{")
         windowMenu.addItem(withTitle: "Show Next Tab", action: #selector(MainWindowController.showNextTab(_:)), keyEquivalent: "}")
         windowMenu.addItem(.separator())

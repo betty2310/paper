@@ -289,6 +289,8 @@ struct ItemDetailView: View {
         detail.fields.doi != nil || detail.fields.arxivId != nil
     }
 
+    private var isFavorite: Bool { store.isFavorite(itemId: detail.id) }
+
     private var pdfAttachment: AttachmentRow? {
         detail.attachments.first { $0.mime == "application/pdf" }
     }
@@ -311,6 +313,15 @@ struct ItemDetailView: View {
             }
             .help("Copy the APA citation to the clipboard (⇧⌘C)")
             .disabled(detail.lookupStatus == .pending)
+            Button {
+                store.toggleFavorite(itemIds: [detail.id])
+            } label: {
+                Image(systemName: isFavorite ? Theme.Symbol.favoriteOn : Theme.Symbol.favorite)
+                    .foregroundStyle(isFavorite ? Theme.Color.swiftUIAccent : Theme.Color.swiftUISecondaryText)
+            }
+            .help(isFavorite ? "Remove from Favorites (⌘D)" : "Add to Favorites (⌘D)")
+            .accessibilityLabel("Favorite")
+            .accessibilityValue(isFavorite ? "On" : "Off")
             Spacer()
             Menu {
                 if let doi = detail.fields.doi {

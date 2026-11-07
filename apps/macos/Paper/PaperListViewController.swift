@@ -11,6 +11,11 @@ import UniformTypeIdentifiers
 final class PaperTableView: NSTableView {
     var onReturn: () -> Void = {}
 
+    /// Clicks on a row's star go to the star instead of selecting the row.
+    override func validateProposedFirstResponder(_ responder: NSResponder, for event: NSEvent?) -> Bool {
+        responder is FavoriteButton || super.validateProposedFirstResponder(responder, for: event)
+    }
+
     override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.function)
         let scalar = event.charactersIgnoringModifiers?.unicodeScalars.first
@@ -271,6 +276,8 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
         menu.addItem(withTitle: "Copy Citation Key", action: #selector(MainWindowController.copyCitationKey(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Export BibTeX…", action: #selector(MainWindowController.exportBibtex(_:)), keyEquivalent: "")
         menu.addItem(.separator())
+        menu.addItem(withTitle: "Add to Favorites", action: #selector(MainWindowController.toggleFavorite(_:)), keyEquivalent: "")
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Copy DOI", action: #selector(copyDOI(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Open Publisher Page", action: #selector(openPublisherPage(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Retry Lookup", action: #selector(retryLookup(_:)), keyEquivalent: "")
@@ -294,7 +301,9 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let cell = tableView.makeView(withIdentifier: Self.cellIdentifier, owner: self) as? PaperRowView
             ?? PaperRowView(identifier: Self.cellIdentifier)
-        cell.configure(with: shownItems[row], pdfStatus: store.pdfStatus[shownItems[row].id], preview: preview(of: shownItems[row]))
+        let item = shownItems[row]
+        cell.configure(with: item, pdfStatus: store.pdfStatus[item.id], preview: preview(of: item))
+        cell.onToggleFavorite = { [weak self] in self?.store.toggleFavorite(itemIds: [item.id]) }
         return cell
     }
 
@@ -353,6 +362,12 @@ final class PaperRowView: NSTableCellView {
     private let added = NSTextField(labelWithString: "")
     private let status = NSImageView()
     private let spinner = NSProgressIndicator()
+    /// The star before the date: always on a favorite, and on other rows
+    /// while the pointer is over them.
+    let favoriteButton = FavoriteButton()
+    var onToggleFavorite: () -> Void = {}
+    private var isFavorite = false
+    private var isHovered = false { didSet { updateFavorite() } }
 
     private static let addedFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -382,7 +397,8 @@ final class PaperRowView: NSTableCellView {
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
 
-        for subview in [preview, title, subtitle, added, status, spinner] as [NSView] {
+        favoriteButton.onPress = { [weak self] in self?.onToggleFavorite() }
+        for subview in [preview, title, subtitle, added, status, spinner, favoriteButton] as [NSView] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             addSubview(subview)
         }
@@ -395,7 +411,11 @@ final class PaperRowView: NSTableCellView {
             preview.widthAnchor.constraint(equalToConstant: Theme.Size.rowPreviewWidth),
             preview.heightAnchor.constraint(equalToConstant: Theme.Size.rowPreviewHeight),
             title.leadingAnchor.constraint(equalTo: preview.trailingAnchor, constant: Theme.Size.rowInset),
-            title.trailingAnchor.constraint(lessThanOrEqualTo: added.leadingAnchor, constant: -Theme.Size.gap),
+            title.trailingAnchor.constraint(lessThanOrEqualTo: favoriteButton.leadingAnchor, constant: -Theme.Size.smallGap),
+            favoriteButton.trailingAnchor.constraint(equalTo: added.leadingAnchor, constant: -Theme.Size.smallGap),
+            favoriteButton.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+            favoriteButton.widthAnchor.constraint(equalToConstant: Theme.Size.favoriteButtonSize),
+            favoriteButton.heightAnchor.constraint(equalToConstant: Theme.Size.favoriteButtonSize),
             title.topAnchor.constraint(equalTo: topAnchor, constant: Theme.Size.gap),
             subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor),
             subtitle.trailingAnchor.constraint(lessThanOrEqualTo: status.leadingAnchor, constant: -Theme.Size.gap),
@@ -419,6 +439,8 @@ final class PaperRowView: NSTableCellView {
 
     func configure(with item: ItemRow, pdfStatus: PdfStatus? = nil, preview: PaperPreviews.Preview) {
         lookupStatus = item.lookupStatus
+        isFavorite = item.favorite
+        updateFavorite()
         self.preview.show(preview)
         added.stringValue = Self.addedFormatter.string(from: item.addedAt)
         // A row added by DOI is titled with the DOI until the lookup ends; a
@@ -454,7 +476,29 @@ final class PaperRowView: NSTableCellView {
             }
         }
         applyColors()
-        setAccessibilityLabel("\(item.title). \(subtitle.stringValue)")
+        setAccessibilityLabel("\(item.favorite ? "Favorite. " : "")\(item.title). \(subtitle.stringValue)")
+    }
+
+    private func updateFavorite() {
+        favoriteButton.isOn = isFavorite
+        favoriteButton.isHidden = !isFavorite && !isHovered && !favoriteButton.hasKeyboardFocus
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self))
+        // A row that moves under or away from a still pointer gets no
+        // entered or exited event.
+        isHovered = isUnderPointer
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        isHovered = false
     }
 
     override var backgroundStyle: NSView.BackgroundStyle {
@@ -463,12 +507,142 @@ final class PaperRowView: NSTableCellView {
 
     private func applyColors() {
         let emphasized = backgroundStyle == .emphasized
+        favoriteButton.isEmphasized = emphasized
         title.textColor = emphasized ? Theme.Color.selectedText : (lookupStatus == .done ? Theme.Color.text : Theme.Color.secondaryText)
         subtitle.textColor = emphasized ? Theme.Color.selectedText : Theme.Color.secondaryText
         added.textColor = emphasized ? Theme.Color.selectedText : Theme.Color.tertiaryText
         if lookupStatus == .done {
             status.contentTintColor = emphasized ? Theme.Color.selectedText : Theme.Color.secondaryText
         }
+    }
+}
+
+/// The favorite star: outlined when off, filled in the accent color when on.
+/// A round quiet fill on hover, a darker one while pressed, the accent ring
+/// for keyboard focus (with full keyboard access), and half opacity while
+/// disabled.
+@MainActor
+final class FavoriteButton: NSView {
+    var onPress: () -> Void = {}
+    var isOn = false { didSet { if isOn != oldValue { update() } } }
+    /// On a selected row, which draws white text on the accent.
+    var isEmphasized = false { didSet { if isEmphasized != oldValue { update() } } }
+    var isEnabled = true { didSet { update() } }
+    private(set) var hasKeyboardFocus = false
+    private let image = NSImageView()
+    private var isHovered = false { didSet { needsDisplay = true } }
+    private var isPressed = false { didSet { needsDisplay = true } }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = Theme.Size.favoriteButtonSize / 2
+        image.symbolConfiguration = .init(pointSize: Theme.Size.favoriteSymbolSize, weight: .medium)
+        image.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(image)
+        NSLayoutConstraint.activate([
+            image.centerXAnchor.constraint(equalTo: centerXAnchor),
+            image.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        focusRingType = .exterior
+        setAccessibilityElement(true)
+        setAccessibilityRole(.checkBox)
+        update()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    private func update() {
+        image.image = NSImage(systemSymbolName: isOn ? Theme.Symbol.favoriteOn : Theme.Symbol.favorite, accessibilityDescription: nil)
+        image.contentTintColor = isEmphasized ? Theme.Color.selectedText : isOn ? Theme.Color.accent : Theme.Color.secondaryText
+        alphaValue = isEnabled ? 1 : Theme.Toast.disabledOpacity
+        toolTip = isOn ? "Remove from Favorites" : "Add to Favorites"
+        setAccessibilityLabel("Favorite")
+        setAccessibilityValue(isOn)
+        needsDisplay = true
+    }
+
+    override func updateLayer() {
+        let fill: NSColor = !isEnabled ? .clear : isPressed ? Theme.Color.controlPressed : isHovered ? Theme.Color.controlHover : .clear
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = fill.cgColor
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self))
+        // A row that moves under or away from a still pointer gets no
+        // entered or exited event.
+        isHovered = isUnderPointer
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
+    /// The star takes clicks on its image too, so the table hands them here.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        !isHidden && frame.contains(point) ? self : nil
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) { isPressed = isEnabled }
+
+    override func mouseUp(with event: NSEvent) {
+        let inside = bounds.contains(convert(event.locationInWindow, from: nil))
+        isPressed = false
+        if isEnabled, inside { onPress() }
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        guard isEnabled else { return false }
+        onPress()
+        return true
+    }
+
+    // MARK: Keyboard
+
+    override var acceptsFirstResponder: Bool { isEnabled && NSApp.isFullKeyboardAccessEnabled }
+    override var canBecomeKeyView: Bool { acceptsFirstResponder }
+
+    /// The ring is for keyboard focus only, not for focus a click gave.
+    override func becomeFirstResponder() -> Bool {
+        hasKeyboardFocus = !NSApp.isMouseEvent
+        focusRingType = hasKeyboardFocus ? .exterior : .none
+        return true
+    }
+
+    override func resignFirstResponder() -> Bool {
+        hasKeyboardFocus = false
+        return true
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.charactersIgnoringModifiers == " " { onPress() } else { super.keyDown(with: event) }
+    }
+
+    override var focusRingMaskBounds: NSRect { bounds }
+
+    override func drawFocusRingMask() {
+        NSBezierPath(ovalIn: bounds).fill()
+    }
+}
+
+extension NSApplication {
+    /// Whether the event being handled is a click, as opposed to a key.
+    var isMouseEvent: Bool {
+        [.leftMouseDown, .leftMouseUp, .rightMouseDown, .otherMouseDown].contains(currentEvent?.type)
+    }
+}
+
+extension NSView {
+    var isUnderPointer: Bool {
+        guard let window, !isHiddenOrHasHiddenAncestor else { return false }
+        return visibleRect.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
     }
 }
 

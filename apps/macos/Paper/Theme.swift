@@ -98,6 +98,12 @@ enum Theme {
         static let tabPadding: CGFloat = 10
         static let tabSpacing: CGFloat = 2
         static let tabCloseSize: CGFloat = 16
+        /// A pinned tab's letter tile, the size of a tab icon.
+        static let tabPinnedRadius: CGFloat = 4
+        /// The star at the end of a paper's title line: a round target
+        /// around a 12 pt symbol.
+        static let favoriteButtonSize: CGFloat = 20
+        static let favoriteSymbolSize: CGFloat = 12
         /// How far the sidebar's lists and a PDF's table of contents travel
         /// as one replaces the other.
         static let sidebarSlide: CGFloat = 24
@@ -205,9 +211,12 @@ enum Theme {
         static let swiftUIToastClose = SwiftUI.Color(nsColor: NSColor.labelColor.withAlphaComponent(0.06))
         static let swiftUIToastCloseHover = SwiftUI.Color(nsColor: NSColor.labelColor.withAlphaComponent(0.1))
         static let swiftUIToastClosePressed = SwiftUI.Color(nsColor: NSColor.labelColor.withAlphaComponent(0.16))
-        /// Hover and pressed fills of the markup toolbar's buttons.
-        static let swiftUIControlHover = SwiftUI.Color(nsColor: NSColor.labelColor.withAlphaComponent(0.06))
-        static let swiftUIControlPressed = SwiftUI.Color(nsColor: NSColor.labelColor.withAlphaComponent(0.12))
+        /// Hover and pressed fills of small icon buttons, such as the
+        /// favorite star and the markup toolbar's buttons.
+        static let controlHover = NSColor.labelColor.withAlphaComponent(0.06)
+        static let controlPressed = NSColor.labelColor.withAlphaComponent(0.12)
+        static let swiftUIControlHover = SwiftUI.Color(nsColor: controlHover)
+        static let swiftUIControlPressed = SwiftUI.Color(nsColor: controlPressed)
         /// The ring around a color dot under the pointer.
         static let swiftUIDotHoverRing = SwiftUI.Color(nsColor: NSColor.labelColor.withAlphaComponent(0.25))
         static let swiftUIPanel = SwiftUI.Color(nsColor: .controlBackgroundColor)
@@ -228,6 +237,8 @@ enum Theme {
         static let rowTitle = serif(size: 15, weight: .regular)
         /// Paper titles in tabs.
         static let tabTitle = serif(size: 13, weight: .regular)
+        /// The letter on a pinned tab's tile.
+        static let tabPinnedLetter = serif(size: 11, weight: .semibold)
         /// The selected paper's title in the inspector.
         static let inspectorTitle = serif(size: 20, weight: .semibold)
         /// The window title and subtitle in the toolbar, as the system draws them.
@@ -449,5 +460,7 @@ enum Theme {
         static let preview = "eye"
         static let task = "square"
         static let taskDone = "checkmark.square.fill"
+        static let favorite = "star"
+        static let favoriteOn = "star.fill"
     }
 }
