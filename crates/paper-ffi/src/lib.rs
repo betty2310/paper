@@ -11,11 +11,11 @@ use std::time::SystemTime;
 
 use paper_engine as engine;
 use paper_engine::{
-    Annotation, AnnotationKind, AnnotationPatch, AttachmentFile, AttachmentRow, CollectionNode,
-    Creator, CreatorRole, Figure, FigureSource, Identification, ImportedPdf, ItemDetail,
-    ItemFields, ItemKind, ItemQuery, ItemRow, LookupStatus, MetadataPatch, NewAnnotation,
-    PagePoint, PageRect, PaperError, PdfStatus, PdfStep, Quad, Scope, Settings, SortColumn, Tag,
-    WindowState,
+    Annotation, AnnotationKind, AnnotationPatch, AttachmentFile, AttachmentRow, Citation,
+    CitationStyle, CollectionNode, Creator, CreatorRole, Figure, FigureSource, Identification,
+    ImportedPdf, ItemDetail, ItemFields, ItemKind, ItemQuery, ItemRow, LookupStatus, MetadataPatch,
+    NewAnnotation, PagePoint, PageRect, PaperError, PdfStatus, PdfStep, Quad, Scope, Settings,
+    SortColumn, Tag, WindowState,
 };
 
 uniffi::setup_scaffolding!();
@@ -101,6 +101,11 @@ pub enum SortColumn {
 pub enum AnnotationKind {
     Highlight,
     Note,
+}
+
+#[uniffi::remote(Enum)]
+pub enum CitationStyle {
+    Apa,
 }
 
 #[uniffi::remote(Error)]
@@ -198,6 +203,7 @@ pub struct MetadataPatch {
     pub pages: Option<String>,
     pub abstract_text: Option<String>,
     pub url: Option<String>,
+    pub citation_key: Option<String>,
 }
 
 #[uniffi::remote(Record)]
@@ -255,6 +261,7 @@ pub struct ItemDetail {
     pub id: String,
     pub fields: ItemFields,
     pub lookup_status: LookupStatus,
+    pub citation_key: Option<String>,
     pub tags: Vec<Tag>,
     pub collection_ids: Vec<String>,
     pub attachments: Vec<AttachmentRow>,
@@ -343,6 +350,12 @@ pub struct NewAnnotation {
 pub struct AnnotationPatch {
     pub color: Option<String>,
     pub comment: Option<String>,
+}
+
+#[uniffi::remote(Record)]
+pub struct Citation {
+    pub text: String,
+    pub html: String,
 }
 
 #[uniffi::remote(Record)]
@@ -621,6 +634,24 @@ impl Engine {
 
     pub fn save_note(&self, item_id: String, markdown: String) -> Result<(), PaperError> {
         self.0.save_note(&item_id, &markdown)
+    }
+
+    // citations
+
+    pub fn bibtex(&self, ids: Vec<String>) -> Result<String, PaperError> {
+        self.0.bibtex(&ids)
+    }
+
+    pub async fn citation(
+        &self,
+        ids: Vec<String>,
+        style: CitationStyle,
+    ) -> Result<Citation, PaperError> {
+        self.0.citation(&ids, style).await
+    }
+
+    pub async fn export_bib(&self, ids: Vec<String>, path: String) -> Result<u32, PaperError> {
+        self.0.export_bib(&ids, &path).await
     }
 
     // settings

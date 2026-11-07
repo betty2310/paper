@@ -274,10 +274,26 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         newCollection(parentId: collection.id)
     }
 
+    /// Writes the papers directly in the clicked collection to a `.bib` file
+    /// named after it.
+    @objc private func exportCollectionClicked(_ sender: Any?) {
+        guard let node = outlineView.item(atRow: outlineView.clickedRow) as? Node,
+              case .collection(let collection) = node.kind
+        else { return }
+        let ids = store.itemIds(inCollection: collection.id)
+        guard !ids.isEmpty else {
+            store.show(Toast(id: "copied", style: .warning, message: "“\(collection.name)” has no papers to export"))
+            return
+        }
+        store.exportBibtex(itemIds: ids, name: collection.name)
+    }
+
     private func makeContextMenu() -> NSMenu {
         let menu = NSMenu()
         menu.addItem(withTitle: "New Collection", action: #selector(MainWindowController.newCollection(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "New Subcollection", action: #selector(newSubcollectionClicked(_:)), keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Export BibTeX…", action: #selector(exportCollectionClicked(_:)), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Rename", action: #selector(renameClicked(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Delete Collection", action: #selector(deleteCollectionClicked(_:)), keyEquivalent: "")

@@ -22,7 +22,10 @@ pub const LIBRARY_FILES_DIR: &str = "files";
 /// `Scope::RecentlyAdded` covers this many days.
 pub const RECENTLY_ADDED_DAYS: i64 = 30;
 
-const MIGRATIONS: &[&str] = &[include_str!("migrations/001_initial.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("migrations/001_initial.sql"),
+    include_str!("migrations/002_citation_keys.sql"),
+];
 
 /// Separator for names packed into one SQL string column.
 const NAME_SEPARATOR: &str = "\u{1f}";
@@ -212,6 +215,9 @@ impl Library {
         if let Some(doi) = patch.doi.as_deref().filter(|doi| !doi.is_empty()) {
             check_doi_free(&tx, doi, Some(id))?;
         }
+        if let Some(key) = patch.citation_key.as_deref().filter(|key| !key.is_empty()) {
+            check_citation_key_free(&tx, key, id)?;
+        }
 
         let mut sets: Vec<String> = vec!["modified_at = ?".into()];
         let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(time::now())];
@@ -236,6 +242,7 @@ impl Library {
         set_text("pages", &patch.pages);
         set_text("abstract", &patch.abstract_text);
         set_text("url", &patch.url);
+        set_text("citation_key", &patch.citation_key);
         if let Some(title) = patch
             .title
             .as_deref()
@@ -274,6 +281,58 @@ impl Library {
             params![id, status.as_str(), time::now()],
         )?;
         not_found_if_zero(changed, id)
+    }
+
+    /// Gives each item that has no citation key one made from its base: the
+    /// base itself when no other item has it, else the base followed by `a`,
+    /// `b`, ..., `z`, `aa`, and so on. Keys are compared without regard to
+    /// case. An item that has a key keeps it, so keys never change on their
+    /// own once given. One transaction for the whole list.
+    pub fn assign_citation_keys(&self, bases: &[(String, String)]) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        for (id, base) in bases {
+            let has_key: Option<bool> = tx
+                .query_row(
+                    "SELECT citation_key IS NOT NULL FROM items WHERE id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            match has_key {
+                None => return Err(PaperError::NotFound { id: id.clone() }),
+                Some(true) => continue,
+                Some(false) => {}
+            }
+            let mut index = 0;
+            let key = loop {
+                let candidate = format!("{base}{}", key_suffix(index));
+                if !citation_key_taken(&tx, &candidate, id)? {
+                    break candidate;
+                }
+                index += 1;
+            };
+            tx.execute(
+                "UPDATE items SET citation_key = ?2 WHERE id = ?1",
+                params![id, key],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Items, deleted or not, that have no citation key and whose lookup is
+    /// `status`.
+    pub fn items_without_citation_key(&self, status: LookupStatus) -> Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let ids = conn
+            .prepare_cached(
+                "SELECT id FROM items WHERE citation_key IS NULL AND lookup_status = ?1
+                 ORDER BY created_at",
+            )?
+            .query_map(params![status.as_str()], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(ids)
     }
 
     /// Removes an item and everything that hangs off it for good. For rows the
@@ -322,7 +381,7 @@ impl Library {
             .query_row(
                 "SELECT kind, doi, arxiv_id, title, container_title, container_short, publisher,
                         year, published_date, volume, issue, pages, abstract, url, issn, language,
-                        extra, lookup_status, created_at, modified_at
+                        extra, lookup_status, citation_key, created_at, modified_at
                  FROM items WHERE id = ?1 AND deleted_at IS NULL",
                 params![id],
                 |row| {
@@ -348,13 +407,15 @@ impl Library {
                             extra: row.get("extra")?,
                         },
                         LookupStatus::from_db(&row.get::<_, String>("lookup_status")?),
+                        row.get::<_, Option<String>>("citation_key")?,
                         row.get::<_, String>("created_at")?,
                         row.get::<_, String>("modified_at")?,
                     ))
                 },
             )
             .optional()?;
-        let Some((mut fields, lookup_status, created_at, modified_at)) = fields else {
+        let Some((mut fields, lookup_status, citation_key, created_at, modified_at)) = fields
+        else {
             return Err(PaperError::NotFound { id: id.to_string() });
         };
 
@@ -407,6 +468,7 @@ impl Library {
             id: id.to_string(),
             fields,
             lookup_status,
+            citation_key,
             tags,
             collection_ids,
             attachments,
@@ -1468,6 +1530,37 @@ fn find_by_doi(conn: &Connection, doi: &str) -> Result<Option<DoiMatch>> {
             },
         )
         .optional()?)
+}
+
+/// `""`, then `a` to `z`, then `aa`, `ab`, and so on.
+fn key_suffix(mut index: usize) -> String {
+    let mut suffix = Vec::new();
+    while index > 0 {
+        index -= 1;
+        suffix.push(b'a' + (index % 26) as u8);
+        index /= 26;
+    }
+    suffix.reverse();
+    String::from_utf8(suffix).unwrap()
+}
+
+/// Whether an item other than `except`, deleted or not, has this key in any
+/// case. Deleted items keep their keys so an undo brings them back intact.
+fn citation_key_taken(conn: &Connection, key: &str, except: &str) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM items WHERE citation_key = ?1 COLLATE NOCASE AND id != ?2)",
+        params![key, except],
+        |row| row.get(0),
+    )?)
+}
+
+fn check_citation_key_free(conn: &Connection, key: &str, except: &str) -> Result<()> {
+    if citation_key_taken(conn, key, except)? {
+        return Err(PaperError::Library {
+            message: format!("Another paper already has the citation key “{key}”."),
+        });
+    }
+    Ok(())
 }
 
 /// Errors with `Duplicate` when a live item other than `except` has this DOI.

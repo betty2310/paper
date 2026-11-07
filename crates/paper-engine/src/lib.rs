@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+pub use paper_cite::{Citation, CitationStyle};
 pub use paper_core::{
     Annotation, AnnotationKind, AnnotationPatch, AttachmentFile, AttachmentRow, CollectionNode,
     Creator, CreatorRole, Figure, FigureSource, Identification, ImportedPdf, ItemDetail,
@@ -127,6 +128,13 @@ impl Engine {
         // A read-only config directory must not keep the user out of their library.
         if let Err(error) = settings.remember_library(library.dir()) {
             tracing::warn!(%error, "could not add the library to the recent list");
+        }
+        // Libraries from before citation keys get theirs once, here.
+        match library.items_without_citation_key(LookupStatus::Done) {
+            Ok(ids) => {
+                give_citation_keys(&library, &ids);
+            }
+            Err(error) => tracing::warn!(%error, "could not list items without citation keys"),
         }
         let http = options.http.unwrap_or_else(|| Arc::new(UreqClient::new()));
         tracing::info!(path = %library.dir().display(), "library opened");
@@ -351,6 +359,7 @@ impl Engine {
         fields.doi = normalized_doi(fields.doi.as_deref())?;
         fields.arxiv_id = normalized_arxiv_id(fields.arxiv_id.as_deref())?;
         let id = self.library.insert_item(&fields, LookupStatus::Done)?;
+        give_citation_keys(&self.library, std::slice::from_ref(&id));
         self.notify(|observer| observer.items_changed(vec![id.clone()]));
         self.library.item_row(&id)
     }
@@ -365,7 +374,21 @@ impl Engine {
         if let Some(arxiv) = patch.arxiv_id.as_deref().filter(|id| !id.is_empty()) {
             patch.arxiv_id = normalized_arxiv_id(Some(arxiv))?;
         }
+        if let Some(key) = &mut patch.citation_key {
+            *key = key.trim().to_string();
+            if !key.is_empty() && !paper_cite::is_valid_key(key) {
+                return Err(PaperError::Library {
+                    message: format!(
+                        "“{key}” cannot be a citation key. Use letters, digits, and - _ : . / without spaces."
+                    ),
+                });
+            }
+        }
         self.library.update_metadata(id, &patch)?;
+        // An emptied key is made again from the metadata as it is now.
+        if patch.citation_key.as_deref() == Some("") {
+            give_citation_keys(&self.library, &[id.to_string()]);
+        }
         self.notify(|observer| observer.items_changed(vec![id.to_string()]));
         Ok(())
     }
@@ -709,6 +732,91 @@ impl Engine {
         Ok(())
     }
 
+    // ----- citations -----
+
+    /// BibTeX entries for the items, sorted by citation key, ready for the
+    /// clipboard or a `.bib` file. An item without a key gets its key now and
+    /// keeps it; one whose lookup is still running is cited under the key it
+    /// would get, without storing it.
+    pub fn bibtex(&self, ids: &[String]) -> Result<String> {
+        self.ensure_open()?;
+        Ok(bibtex_of(&self.cited_items(ids)?))
+    }
+
+    /// The items' reference list entries in `style`, in the style's order,
+    /// as plain text and as HTML. The style's processor runs on an engine
+    /// thread: loading a style takes a moment the first time.
+    pub async fn citation(&self, ids: &[String], style: CitationStyle) -> Result<Citation> {
+        self.ensure_open()?;
+        let items = self.cited_items(ids)?;
+        let outcome = self
+            .run(move || {
+                let cited: Vec<paper_cite::CiteItem<'_>> = items
+                    .iter()
+                    .map(|(key, fields)| paper_cite::CiteItem { key, fields })
+                    .collect();
+                paper_cite::citation(&cited, style)
+            })
+            .await;
+        match outcome {
+            Ok(citation) => Ok(citation),
+            Err(PoolError::Closed) => Err(PaperError::Closed),
+            Err(PoolError::Panicked(message)) => Err(PaperError::Library { message }),
+        }
+    }
+
+    /// Writes `bibtex(ids)` to a `.bib` file at `path`, replacing it, and
+    /// returns how many entries it holds.
+    pub async fn export_bib(&self, ids: &[String], path: &str) -> Result<u32> {
+        self.ensure_open()?;
+        let items = self.cited_items(ids)?;
+        let bibtex = bibtex_of(&items);
+        let count = items.len() as u32;
+        let path = PathBuf::from(path);
+        let outcome = self
+            .run(move || -> Result<u32> {
+                std::fs::write(&path, bibtex)?;
+                Ok(count)
+            })
+            .await;
+        match outcome {
+            Ok(outcome) => outcome,
+            Err(PoolError::Closed) => Err(PaperError::Closed),
+            Err(PoolError::Panicked(message)) => Err(PaperError::Io { message }),
+        }
+    }
+
+    /// Each item's key and fields, sorted by key, giving keys to items that
+    /// have finished their lookup and have none yet.
+    fn cited_items(&self, ids: &[String]) -> Result<Vec<(String, ItemFields)>> {
+        let mut unique = HashSet::new();
+        let ids: Vec<String> = ids
+            .iter()
+            .filter(|id| unique.insert(id.as_str()))
+            .cloned()
+            .collect();
+        let mut waiting = Vec::new();
+        for id in &ids {
+            if self.library.item(id)?.lookup_status != LookupStatus::Pending {
+                waiting.push(id.clone());
+            }
+        }
+        let given = give_citation_keys(&self.library, &waiting);
+        if !given.is_empty() {
+            self.notify(|observer| observer.items_changed(given));
+        }
+        let mut items = Vec::with_capacity(ids.len());
+        for id in &ids {
+            let detail = self.library.item(id)?;
+            let key = detail
+                .citation_key
+                .unwrap_or_else(|| paper_cite::key_base(&detail.fields));
+            items.push((key, detail.fields));
+        }
+        items.sort_by_key(|(key, _)| key.to_lowercase());
+        Ok(items)
+    }
+
     // ----- settings -----
 
     pub fn settings(&self) -> Settings {
@@ -787,6 +895,38 @@ fn forget_undo(undo: &UndoBatches, item_id: &str) {
     undo.retain(|batch| !batch.is_empty());
 }
 
+fn bibtex_of(items: &[(String, ItemFields)]) -> String {
+    let cited: Vec<paper_cite::CiteItem<'_>> = items
+        .iter()
+        .map(|(key, fields)| paper_cite::CiteItem { key, fields })
+        .collect();
+    paper_cite::bibtex(&cited)
+}
+
+/// Gives each of these items that has no citation key one made from its
+/// metadata, and returns the ids that got one. Keys are a convenience next to
+/// the work that triggers them, so a failure is logged, not returned.
+fn give_citation_keys(library: &Library, ids: &[String]) -> Vec<String> {
+    let mut bases = Vec::new();
+    for id in ids {
+        match library.item(id) {
+            Ok(detail) if detail.citation_key.is_none() => {
+                bases.push((id.clone(), paper_cite::key_base(&detail.fields)));
+            }
+            // Deleted items get theirs when they are back and cited.
+            Ok(_) | Err(PaperError::NotFound { .. }) => {}
+            Err(error) => {
+                tracing::warn!(%error, item_id = %id, "could not read an item for its citation key")
+            }
+        }
+    }
+    if let Err(error) = library.assign_citation_keys(&bases) {
+        tracing::warn!(%error, "could not give citation keys");
+        return Vec::new();
+    }
+    bases.into_iter().map(|(id, _)| id).collect()
+}
+
 fn notify(observer: &SharedObserver, call: impl FnOnce(&dyn EngineObserver)) {
     // Clone the observer out so the lock is not held during the callback.
     let observer = observer.lock().unwrap().clone();
@@ -840,6 +980,7 @@ impl LookupJob {
         };
         match outcome {
             Ok(()) => {
+                give_citation_keys(&self.library, std::slice::from_ref(&self.item_id));
                 notify(&self.observer, |observer| {
                     observer.lookup_progress(self.item_id.clone(), LookupStatus::Done)
                 });

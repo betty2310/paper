@@ -66,7 +66,7 @@ Each paper has a free-form note in Markdown with a plain editor and a rendered p
 
 ### Cite
 
-From the item list or the viewer, the user can copy a BibTeX entry or a formatted citation (APA to start, more CSL styles later) to the clipboard, and can export a selection of items to a .bib file.
+From the item list or the viewer, the user can copy a BibTeX entry or a formatted citation (APA to start, more CSL styles later) to the clipboard, and can export a selection of items or a whole collection to a .bib file. Each paper has a citation key such as `vaswani2017attention`, made once from its first author, year, and title and kept from then on, so documents that cite it keep working. The user can copy the key for `\cite{}` or set their own.
 
 ## Requirements by area
 
@@ -81,7 +81,7 @@ From the item list or the viewer, the user can copy a BibTeX entry or a formatte
 | Viewer | Continuous scrolling, zoom from 50% to 400%, page thumbnails optional, text search, outline, links, remember last page per PDF. |
 | Annotations | Highlight, underline, strikethrough, sticky note, rectangle. Colors, comment text, created and modified times. Export to PDF copy. |
 | Notes | One Markdown note per item, autosaved. |
-| Citation | Copy BibTeX, copy APA, export .bib. |
+| Citation | Copy BibTeX, copy APA (rich and plain text), copy citation keys, export a selection or a collection to .bib. Stable, unique, editable citation keys. |
 | Platforms | Version 1.0: macOS 13 and later on Apple silicon and Intel, signed, notarized, sandboxed, with Sparkle updates. After 1.0: Windows 10 and later, Linux. The engine builds and passes its tests on all three from the start. |
 | Offline | Everything except adding by DOI works offline. Adding a DOI offline queues the lookup. |
 

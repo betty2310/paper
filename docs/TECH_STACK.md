@@ -62,11 +62,11 @@ Rejected: reqwest and tokio (a runtime inside a static library that Swift calls 
 
 Decision: unchanged. Crossref REST (polite pool) is the primary metadata source. DOI content negotiation (CSL JSON) is the fallback for DataCite DOIs. OpenAlex supplies open access status and PDF links, with Unpaywall second. arXiv and Europe PMC handle preprints and life science papers. Semantic Scholar is off by default. The app never scrapes aggressively and never bypasses paywalls. See `docs/research/doi-and-pdf-sources.md`.
 
-## 9. Citations: hayagriva and biblatex
+## 9. Citations: hayagriva, and BibTeX written by hand
 
-Decision: `hayagriva` for formatted citations (about 100 bundled CSL styles including APA) and `biblatex` for BibTeX generation and parsing, both in the engine.
+Decision: `hayagriva` for formatted citations (about 100 bundled CSL styles including APA), and a small BibTeX writer of our own in `paper-cite`, both in the engine. The writer keeps the escaping of LaTeX's special characters, the braces that protect capitals in titles, and the field order under our control and stable. `deunicode` folds names to ASCII for citation keys.
 
-Rejected: `citeproc-rs` (abandoned). Calling doi.org for BibTeX (local generation is instant and works offline).
+Rejected: `citeproc-rs` (abandoned). `biblatex` for writing (its output is fine, but we would still map every field and fix the escaping ourselves; it returns when Paper needs to read `.bib` files). Calling doi.org for BibTeX (local generation is instant and works offline).
 
 ## 10. Other choices
 

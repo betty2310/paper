@@ -344,9 +344,19 @@ uint64_t uniffi_paper_ffi_fn_method_engine_attach_file(uint64_t ptr, RustBuffer 
 RustBuffer uniffi_paper_ffi_fn_method_engine_attachment_file(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_BIBTEX
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_BIBTEX
+RustBuffer uniffi_paper_ffi_fn_method_engine_bibtex(uint64_t ptr, RustBuffer ids, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_CAN_UNDO_DELETE
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_CAN_UNDO_DELETE
 int8_t uniffi_paper_ffi_fn_method_engine_can_undo_delete(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_CITATION
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_CITATION
+uint64_t uniffi_paper_ffi_fn_method_engine_citation(uint64_t ptr, RustBuffer ids, RustBuffer style
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_CLOSE
@@ -387,6 +397,11 @@ void uniffi_paper_ffi_fn_method_engine_delete_collection(uint64_t ptr, RustBuffe
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_DELETE_ITEMS
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_DELETE_ITEMS
 void uniffi_paper_ffi_fn_method_engine_delete_items(uint64_t ptr, RustBuffer ids, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_EXPORT_BIB
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_EXPORT_BIB
+uint64_t uniffi_paper_ffi_fn_method_engine_export_bib(uint64_t ptr, RustBuffer ids, RustBuffer path
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_FIND_PDF
@@ -885,9 +900,21 @@ uint16_t uniffi_paper_ffi_checksum_method_engine_attachment_file(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_BIBTEX
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_BIBTEX
+uint16_t uniffi_paper_ffi_checksum_method_engine_bibtex(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_CAN_UNDO_DELETE
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_CAN_UNDO_DELETE
 uint16_t uniffi_paper_ffi_checksum_method_engine_can_undo_delete(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_CITATION
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_CITATION
+uint16_t uniffi_paper_ffi_checksum_method_engine_citation(void
     
 );
 #endif
@@ -936,6 +963,12 @@ uint16_t uniffi_paper_ffi_checksum_method_engine_delete_collection(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_DELETE_ITEMS
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_DELETE_ITEMS
 uint16_t uniffi_paper_ffi_checksum_method_engine_delete_items(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_EXPORT_BIB
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_EXPORT_BIB
+uint16_t uniffi_paper_ffi_checksum_method_engine_export_bib(void
     
 );
 #endif

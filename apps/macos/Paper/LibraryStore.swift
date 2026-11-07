@@ -556,6 +556,93 @@ final class LibraryStore: ObservableObject {
         perform { try engine.removeFromCollection(collectionId: collectionId, itemIds: itemIds) }
     }
 
+    // MARK: Citations
+
+    /// Copies the papers' BibTeX entries, sorted by citation key.
+    func copyBibtex(itemIds: [String]) {
+        guard !itemIds.isEmpty else { return }
+        perform {
+            let bibtex = try engine.bibtex(ids: itemIds)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(bibtex, forType: .string)
+            show(Toast(id: Self.copiedToast, style: .done,
+                       message: itemIds.count == 1 ? "BibTeX copied" : "BibTeX for \(itemIds.count) papers copied"))
+        }
+    }
+
+    /// Copies the papers' APA references, as rich text with the style's
+    /// italics for word processors and as plain text for everything else.
+    func copyCitation(itemIds: [String]) {
+        guard !itemIds.isEmpty else { return }
+        Task {
+            do {
+                let citation = try await engine.citation(ids: itemIds, style: .apa)
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.declareTypes([.html, .string], owner: nil)
+                pasteboard.setString(citation.html, forType: .html)
+                pasteboard.setString(citation.text, forType: .string)
+                show(Toast(id: Self.copiedToast, style: .done,
+                           message: itemIds.count == 1 ? "APA citation copied" : "APA citations for \(itemIds.count) papers copied"))
+            } catch {
+                report(error)
+            }
+        }
+    }
+
+    /// Copies the papers' citation keys, comma separated as `\cite{}` takes
+    /// them. A paper cited for the first time gets its key now.
+    func copyCitationKeys(itemIds: [String]) {
+        guard !itemIds.isEmpty else { return }
+        perform {
+            if try itemIds.contains(where: { try engine.itemDetail(id: $0).citationKey == nil }) {
+                _ = try engine.bibtex(ids: itemIds)
+            }
+            let keys = try itemIds.compactMap { try engine.itemDetail(id: $0).citationKey }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(keys.joined(separator: ","), forType: .string)
+            show(Toast(id: Self.copiedToast, style: .done,
+                       message: keys.count == 1 ? "Citation key copied" : "\(keys.count) citation keys copied",
+                       subject: keys.count == 1 ? keys.first : nil))
+        }
+    }
+
+    /// Asks where to save a `.bib` file of the papers and writes it.
+    /// `name` is the suggested file name without its extension.
+    func exportBibtex(itemIds: [String], name: String) {
+        guard !itemIds.isEmpty else { return }
+        let panel = NSSavePanel()
+        panel.title = "Export BibTeX"
+        panel.message = itemIds.count == 1
+            ? "Paper writes the paper's BibTeX entry to a .bib file."
+            : "Paper writes BibTeX entries for the \(itemIds.count) papers to a .bib file."
+        panel.allowedContentTypes = [Self.bibType]
+        panel.nameFieldStringValue = "\(name).bib"
+        panel.canCreateDirectories = true
+        panel.prompt = "Export"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            do {
+                let count = try await engine.exportBib(ids: itemIds, path: url.path)
+                show(Toast(id: Self.copiedToast, style: .done,
+                           message: count == 1 ? "Exported 1 paper" : "Exported \(count) papers",
+                           subject: url.lastPathComponent,
+                           action: .init(title: "Show") { NSWorkspace.shared.activateFileViewerSelecting([url]) }))
+            } catch {
+                report(error)
+            }
+        }
+    }
+
+    /// The papers directly in a collection, which is what its list shows.
+    func itemIds(inCollection id: String) -> [String] {
+        let query = ItemQuery(text: "", scope: .collection(id: id), sort: .title, ascending: true)
+        return ((try? engine.listItems(query: query)) ?? []).map(\.id)
+    }
+
+    /// `.bib` files, as whatever type the installed TeX tools declare for them.
+    private static let bibType = UTType(filenameExtension: "bib", conformingTo: .plainText) ?? .plainText
+
     // MARK: Settings
 
     var settings: Settings { engine.settings() }
@@ -573,6 +660,8 @@ final class LibraryStore: ObservableObject {
 
     private static let trashToast = "trash"
     private static let errorToast = "error"
+    /// Feedback on a copy or an export; a newer one replaces it.
+    private static let copiedToast = "copied"
 
     /// Shows a toast, or updates the one with the same id in place.
     func show(_ toast: Toast) {

@@ -173,6 +173,8 @@ pub struct MetadataPatch {
     pub pages: Option<String>,
     pub abstract_text: Option<String>,
     pub url: Option<String>,
+    /// A key the user chose. `Some("")` makes a new one from the metadata.
+    pub citation_key: Option<String>,
 }
 
 /// One row of the library table.
@@ -290,6 +292,10 @@ pub struct ItemDetail {
     pub id: String,
     pub fields: ItemFields,
     pub lookup_status: LookupStatus,
+    /// The key for `\cite{}` and the `.bib` file, such as
+    /// `vaswani2017attention`. Given once the metadata is in (or when the
+    /// paper is first cited) and kept from then on; `None` before that.
+    pub citation_key: Option<String>,
     pub tags: Vec<Tag>,
     /// Ids of the collections the item is in.
     pub collection_ids: Vec<String>,

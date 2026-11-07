@@ -5,6 +5,7 @@ members = [
     "crates/paper-core",
     "crates/paper-fetch",
     "crates/paper-identify",
+    "crates/paper-cite",
     "crates/paper-engine",
     "crates/paper-ffi",
     "tools/uniffi-bindgen",
@@ -21,6 +22,7 @@ paper-ids = { path = "crates/paper-ids" }
 paper-core = { path = "crates/paper-core" }
 paper-fetch = { path = "crates/paper-fetch" }
 paper-identify = { path = "crates/paper-identify" }
+paper-cite = { path = "crates/paper-cite" }
 paper-engine = { path = "crates/paper-engine" }
 uniffi = "0.32"
 thiserror = "2"

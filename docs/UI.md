@@ -38,7 +38,9 @@ Dragging PDFs from Finder over the paper list covers it with an 8 px inset accen
 
 ### Detail panel
 
-The selected paper's title in 22 px serif, authors in 15 px sans, venue line "NeurIPS · 2020 · 33(1)" in muted sans, the DOI as an accent colored link with an external link icon, then a row of three buttons: "Open PDF" (primary), "Copy BibTeX", and "Cite". Below are collapsible sections with uppercase labels and hairline dividers: ABSTRACT, ATTACHMENTS (file rows with size), TAGS (chips plus a "+" chip), and NOTES (a quiet card that opens the note editor on click). A "⋯" menu at the top right holds Reveal in Finder, Find PDF again, Edit metadata, and Delete.
+The selected paper's title in 22 px serif, authors in 15 px sans, venue line "NeurIPS · 2020 · 33(1)" in muted sans, the DOI as an accent colored link with an external link icon, then a row of two buttons: "Copy BibTeX" and "Cite" (copies the APA reference, as rich text with its italics and as plain text). The PDF is opened from its row in the PDF section. Below are collapsible sections with uppercase labels and hairline dividers: ABSTRACT, ATTACHMENTS (file rows with size), TAGS (chips plus a "+" chip), and NOTES (a quiet card that opens the note editor on click). A "⋯" menu at the end of the button row holds Copy DOI, Copy Citation Key, Export BibTeX…, Edit Metadata…, Open Publisher Page, Retry Lookup, Attach PDF…, Reveal PDF in Finder, and Delete. The DETAILS section lists the paper's citation key, and the metadata editor has a Citation key field; clearing it makes a new key from the metadata. With several papers selected, the panel offers Copy BibTeX, Cite, Export BibTeX…, and Delete for all of them.
+
+The citation commands act on the list's selection, or on the paper in front while a PDF tab is. They are in the Paper menu (Copy BibTeX, Copy APA Citation, Copy Citation Key), in the paper list's context menu with Export BibTeX…, and Export BibTeX… is in the File menu. A collection's context menu in the sidebar exports the papers directly in it to a .bib file named after the collection; a single paper's file is named after its key. Each copy or export confirms with a toast, and an export's toast has Show to reveal the file in Finder.
 
 ### Reader tab
 
@@ -125,6 +127,7 @@ Every interactive element has hover (background 3% darker), pressed (6% darker),
 | Add sticky note (then click where it goes) | ⌃⌘N, because ⌘⇧N is New Collection | Ctrl+Shift+N |
 | Back and forward after following a link | ⌘[ and ⌘] | Alt+Left and Alt+Right |
 | Copy BibTeX, copy citation | ⌥⌘B, ⌘⇧C | Ctrl+Alt+B, Ctrl+Shift+C |
+| Export BibTeX | ⌘⇧E | Ctrl+Shift+E |
 | Zoom in, out, fit width | ⌘+, ⌘−, ⌘0 | Ctrl++, Ctrl+−, Ctrl+0 |
 
 ## Implementation notes for the macOS app

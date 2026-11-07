@@ -471,6 +471,22 @@ private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
+    typealias FfiType = UInt32
+    typealias SwiftType = UInt32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterInt32: FfiConverterPrimitive {
     typealias FfiType = Int32
     typealias SwiftType = Int32
@@ -660,7 +676,11 @@ public protocol EngineProtocol: AnyObject, Sendable {
     
     func attachmentFile(id: String) throws  -> AttachmentFile
     
+    func bibtex(ids: [String]) throws  -> String
+    
     func canUndoDelete()  -> Bool
+    
+    func citation(ids: [String], style: CitationStyle) async throws  -> Citation
     
     func close() 
     
@@ -677,6 +697,8 @@ public protocol EngineProtocol: AnyObject, Sendable {
     func deleteCollection(id: String) throws 
     
     func deleteItems(ids: [String]) throws 
+    
+    func exportBib(ids: [String], path: String) async throws  -> UInt32
     
     func findPdf(itemId: String) async throws  -> AttachmentRow
     
@@ -858,6 +880,16 @@ open func attachmentFile(id: String)throws  -> AttachmentFile  {
 })
 }
     
+open func bibtex(ids: [String])throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypePaperError_lift) {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engine_bibtex(
+            self.uniffiCloneHandle(),
+        FfiConverterSequenceString.lower(ids),uniffiCallStatus
+    )
+})
+}
+    
 open func canUndoDelete() -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
         uniffiCallStatus in
@@ -865,6 +897,22 @@ open func canUndoDelete() -> Bool  {
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
+}
+    
+open func citation(ids: [String], style: CitationStyle)async throws  -> Citation  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_paper_ffi_fn_method_engine_citation(
+                        self.uniffiCloneHandle(),FfiConverterSequenceString.lower(ids),FfiConverterTypeCitationStyle_lower(style)
+                )
+            },
+            pollFunc: ffi_paper_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_paper_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_paper_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeCitation_lift,
+            errorHandler: FfiConverterTypePaperError_lift
+        )
 }
     
 open func close()  {try! rustCall() {
@@ -940,6 +988,22 @@ open func deleteItems(ids: [String])throws   {try rustCallWithError(FfiConverter
         FfiConverterSequenceString.lower(ids),uniffiCallStatus
     )
 }
+}
+    
+open func exportBib(ids: [String], path: String)async throws  -> UInt32  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_paper_ffi_fn_method_engine_export_bib(
+                        self.uniffiCloneHandle(),FfiConverterSequenceString.lower(ids),FfiConverterString.lower(path)
+                )
+            },
+            pollFunc: ffi_paper_ffi_rust_future_poll_u32,
+            completeFunc: ffi_paper_ffi_rust_future_complete_u32,
+            freeFunc: ffi_paper_ffi_rust_future_free_u32,
+            liftFunc: FfiConverterUInt32.lift,
+            errorHandler: FfiConverterTypePaperError_lift
+        )
 }
     
 open func findPdf(itemId: String)async throws  -> AttachmentRow  {
@@ -1914,6 +1978,60 @@ public func FfiConverterTypeAttachmentRow_lower(_ value: AttachmentRow) -> RustB
 }
 
 
+public struct Citation: Equatable, Hashable {
+    public var text: String
+    public var html: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(text: String, html: String) {
+        self.text = text
+        self.html = html
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension Citation: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCitation: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Citation {
+        return
+            try Citation(
+                text: FfiConverterString.read(from: &buf), 
+                html: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Citation, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.text, into: &buf)
+        FfiConverterString.write(value.html, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCitation_lift(_ buf: RustBuffer) throws -> Citation {
+    return try FfiConverterTypeCitation.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCitation_lower(_ value: Citation) -> RustBuffer {
+    return FfiConverterTypeCitation.lower(value)
+}
+
+
 public struct CollectionNode: Equatable, Hashable {
     public var id: String
     public var parentId: String?
@@ -2166,6 +2284,7 @@ public struct ItemDetail: Equatable, Hashable {
     public var id: String
     public var fields: ItemFields
     public var lookupStatus: LookupStatus
+    public var citationKey: String?
     public var tags: [Tag]
     public var collectionIds: [String]
     public var attachments: [AttachmentRow]
@@ -2175,10 +2294,11 @@ public struct ItemDetail: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, fields: ItemFields, lookupStatus: LookupStatus, tags: [Tag], collectionIds: [String], attachments: [AttachmentRow], note: String?, addedAt: Date, modifiedAt: Date) {
+    public init(id: String, fields: ItemFields, lookupStatus: LookupStatus, citationKey: String?, tags: [Tag], collectionIds: [String], attachments: [AttachmentRow], note: String?, addedAt: Date, modifiedAt: Date) {
         self.id = id
         self.fields = fields
         self.lookupStatus = lookupStatus
+        self.citationKey = citationKey
         self.tags = tags
         self.collectionIds = collectionIds
         self.attachments = attachments
@@ -2206,6 +2326,7 @@ public struct FfiConverterTypeItemDetail: FfiConverterRustBuffer {
                 id: FfiConverterString.read(from: &buf), 
                 fields: FfiConverterTypeItemFields.read(from: &buf), 
                 lookupStatus: FfiConverterTypeLookupStatus.read(from: &buf), 
+                citationKey: FfiConverterOptionString.read(from: &buf), 
                 tags: FfiConverterSequenceTypeTag.read(from: &buf), 
                 collectionIds: FfiConverterSequenceString.read(from: &buf), 
                 attachments: FfiConverterSequenceTypeAttachmentRow.read(from: &buf), 
@@ -2219,6 +2340,7 @@ public struct FfiConverterTypeItemDetail: FfiConverterRustBuffer {
         FfiConverterString.write(value.id, into: &buf)
         FfiConverterTypeItemFields.write(value.fields, into: &buf)
         FfiConverterTypeLookupStatus.write(value.lookupStatus, into: &buf)
+        FfiConverterOptionString.write(value.citationKey, into: &buf)
         FfiConverterSequenceTypeTag.write(value.tags, into: &buf)
         FfiConverterSequenceString.write(value.collectionIds, into: &buf)
         FfiConverterSequenceTypeAttachmentRow.write(value.attachments, into: &buf)
@@ -2526,10 +2648,11 @@ public struct MetadataPatch: Equatable, Hashable {
     public var pages: String?
     public var abstractText: String?
     public var url: String?
+    public var citationKey: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(kind: ItemKind?, doi: String?, arxivId: String?, title: String?, creators: [Creator]?, containerTitle: String?, containerShort: String?, publisher: String?, year: Int32?, publishedDate: String?, volume: String?, issue: String?, pages: String?, abstractText: String?, url: String?) {
+    public init(kind: ItemKind?, doi: String?, arxivId: String?, title: String?, creators: [Creator]?, containerTitle: String?, containerShort: String?, publisher: String?, year: Int32?, publishedDate: String?, volume: String?, issue: String?, pages: String?, abstractText: String?, url: String?, citationKey: String?) {
         self.kind = kind
         self.doi = doi
         self.arxivId = arxivId
@@ -2545,6 +2668,7 @@ public struct MetadataPatch: Equatable, Hashable {
         self.pages = pages
         self.abstractText = abstractText
         self.url = url
+        self.citationKey = citationKey
     }
 
     
@@ -2577,7 +2701,8 @@ public struct FfiConverterTypeMetadataPatch: FfiConverterRustBuffer {
                 issue: FfiConverterOptionString.read(from: &buf), 
                 pages: FfiConverterOptionString.read(from: &buf), 
                 abstractText: FfiConverterOptionString.read(from: &buf), 
-                url: FfiConverterOptionString.read(from: &buf)
+                url: FfiConverterOptionString.read(from: &buf), 
+                citationKey: FfiConverterOptionString.read(from: &buf)
         )
     }
 
@@ -2597,6 +2722,7 @@ public struct FfiConverterTypeMetadataPatch: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.pages, into: &buf)
         FfiConverterOptionString.write(value.abstractText, into: &buf)
         FfiConverterOptionString.write(value.url, into: &buf)
+        FfiConverterOptionString.write(value.citationKey, into: &buf)
     }
 }
 
@@ -3144,6 +3270,65 @@ public func FfiConverterTypeAnnotationKind_lift(_ buf: RustBuffer) throws -> Ann
 #endif
 public func FfiConverterTypeAnnotationKind_lower(_ value: AnnotationKind) -> RustBuffer {
     return FfiConverterTypeAnnotationKind.lower(value)
+}
+
+
+
+
+public enum CitationStyle: Equatable, Hashable {
+    
+    case apa
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension CitationStyle: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCitationStyle: FfiConverterRustBuffer {
+    typealias SwiftType = CitationStyle
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CitationStyle {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .apa
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: CitationStyle, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .apa:
+            writeInt(&buf, Int32(1))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCitationStyle_lift(_ buf: RustBuffer) throws -> CitationStyle {
+    return try FfiConverterTypeCitationStyle.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCitationStyle_lower(_ value: CitationStyle) -> RustBuffer {
+    return FfiConverterTypeCitationStyle.lower(value)
 }
 
 
@@ -4634,7 +4819,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_paper_ffi_checksum_method_engine_attachment_file() != 59480) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_paper_ffi_checksum_method_engine_bibtex() != 62760) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_paper_ffi_checksum_method_engine_can_undo_delete() != 40194) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paper_ffi_checksum_method_engine_citation() != 58609) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_close() != 5492) {
@@ -4659,6 +4850,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_delete_items() != 26526) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paper_ffi_checksum_method_engine_export_bib() != 15945) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_find_pdf() != 62843) {

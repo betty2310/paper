@@ -1,0 +1,13 @@
+[package]
+name = "paper-cite"
+description = "Citation keys, BibTeX, and formatted citations (CSL through hayagriva) for items. No I/O."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+paper-core.workspace = true
+hayagriva = { version = "0.10", default-features = false, features = ["archive"] }
+deunicode = "1"
+serde_json.workspace = true
+tracing.workspace = true

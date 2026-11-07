@@ -120,10 +120,26 @@ struct MultipleSelectionView: View {
                 .font(Theme.Font.swiftUISecondary)
                 .foregroundStyle(Theme.Color.swiftUISecondaryText)
                 .multilineTextAlignment(.center)
-            Button("Delete", role: .destructive) {
-                store.delete(itemIds: store.selectedItemIds)
+            HStack(spacing: Theme.Size.gap) {
+                Button {
+                    store.copyBibtex(itemIds: store.selectedItemIds)
+                } label: {
+                    Label("Copy BibTeX", systemImage: Theme.Symbol.copy)
+                }
+                .help("Copy the papers' BibTeX entries (⌥⌘B)")
+                Button("Cite") { store.copyCitation(itemIds: store.selectedItemIds) }
+                    .help("Copy the papers' APA citations (⇧⌘C)")
             }
             .padding(.top, Theme.Size.gap)
+            HStack(spacing: Theme.Size.gap) {
+                Button("Export BibTeX…") {
+                    NSApp.sendAction(#selector(MainWindowController.exportBibtex(_:)), to: nil, from: nil)
+                }
+                .help("Write the papers to a .bib file (⇧⌘E)")
+                Button("Delete", role: .destructive) {
+                    store.delete(itemIds: store.selectedItemIds)
+                }
+            }
         }
         .padding(Theme.Size.padding)
     }
@@ -283,24 +299,35 @@ struct ItemDetailView: View {
 
     private var actions: some View {
         HStack(spacing: Theme.Size.gap) {
-            if let doi = detail.fields.doi {
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(doi, forType: .string)
-                    store.show(Toast(id: "copied", style: .done, message: "DOI copied"))
-                } label: {
-                    Label("Copy DOI", systemImage: Theme.Symbol.copy)
-                }
-                .help("Copy the DOI to the clipboard")
-            }
             Button {
-                showEditor = true
+                store.copyBibtex(itemIds: [detail.id])
             } label: {
-                Label("Edit", systemImage: Theme.Symbol.edit)
+                Label("Copy BibTeX", systemImage: Theme.Symbol.copy)
             }
-            .help("Edit the metadata")
+            .help("Copy the BibTeX entry to the clipboard (⌥⌘B)")
+            .disabled(detail.lookupStatus == .pending)
+            Button("Cite") {
+                store.copyCitation(itemIds: [detail.id])
+            }
+            .help("Copy the APA citation to the clipboard (⇧⌘C)")
+            .disabled(detail.lookupStatus == .pending)
             Spacer()
             Menu {
+                if let doi = detail.fields.doi {
+                    Button("Copy DOI") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(doi, forType: .string)
+                        store.show(Toast(id: "copied", style: .done, message: "DOI copied"))
+                    }
+                }
+                Button("Copy Citation Key") { store.copyCitationKeys(itemIds: [detail.id]) }
+                    .disabled(detail.lookupStatus == .pending)
+                Button("Export BibTeX…") {
+                    store.exportBibtex(itemIds: [detail.id], name: detail.citationKey ?? "Paper")
+                }
+                .disabled(detail.lookupStatus == .pending)
+                Button("Edit Metadata…") { showEditor = true }
+                Divider()
                 if let url = detail.fields.url.flatMap(URL.init(string:)) {
                     Button("Open Publisher Page") { NSWorkspace.shared.open(url) }
                 }
@@ -510,6 +537,7 @@ struct ItemDetailView: View {
 
     private var details: some View {
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Theme.Size.padding, verticalSpacing: Theme.Size.smallGap) {
+            detailRow("Cite key", detail.citationKey)
             detailRow("Venue", detail.fields.containerTitle)
             detailRow("Publisher", detail.fields.publisher)
             detailRow("Published", detail.fields.publishedDate)
@@ -636,6 +664,7 @@ struct MetadataEditor: View {
     @State private var doi: String
     @State private var arxivId: String
     @State private var url: String
+    @State private var citationKey: String
     @State private var kind: ItemKind
     @State private var pdf: URL?
     @FocusState private var titleFocused: Bool
@@ -659,6 +688,11 @@ struct MetadataEditor: View {
         _doi = State(initialValue: fields.doi ?? "")
         _arxivId = State(initialValue: fields.arxivId ?? "")
         _url = State(initialValue: fields.url ?? "")
+        if case .edit(let detail, _) = mode {
+            _citationKey = State(initialValue: detail.citationKey ?? "")
+        } else {
+            _citationKey = State(initialValue: "")
+        }
         _kind = State(initialValue: fields.kind ?? .other)
     }
 
@@ -710,6 +744,9 @@ struct MetadataEditor: View {
                     TextField("DOI", text: $doi)
                     TextField("arXiv ID", text: $arxivId)
                     TextField("URL", text: $url)
+                    if !isNew {
+                        TextField("Citation key", text: $citationKey, prompt: Text("Empty makes one from the metadata"))
+                    }
                 }
             }
             .formStyle(.grouped)
@@ -820,8 +857,16 @@ struct MetadataEditor: View {
             issue: issue,
             pages: pages,
             abstractText: trimmed(abstractText),
-            url: url
+            url: url,
+            citationKey: citationKeyChange
         )
+    }
+
+    /// Only a changed key is sent, so saving other edits never remakes it.
+    private var citationKeyChange: String? {
+        guard case .edit(let detail, _) = mode else { return nil }
+        let key = trimmed(citationKey)
+        return key == (detail.citationKey ?? "") ? nil : key
     }
 
     private var newFields: ItemFields {

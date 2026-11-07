@@ -6,8 +6,8 @@ use std::thread::{self, ThreadId};
 use std::time::{Duration, Instant};
 
 use paper_engine::{
-    Engine, EngineObserver, EngineOptions, Identification, ItemFields, ItemKind, ItemQuery,
-    LookupStatus, MetadataPatch, PaperError, PdfStatus, PdfStep, Scope,
+    CitationStyle, Creator, Engine, EngineObserver, EngineOptions, Identification, ItemFields,
+    ItemKind, ItemQuery, LookupStatus, MetadataPatch, PaperError, PdfStatus, PdfStep, Scope,
 };
 use paper_fetch::testing::FakeHttp;
 use pollster::block_on;
@@ -1289,4 +1289,100 @@ fn offline_imports_keep_the_file_and_non_pdfs_add_nothing() {
         Err(PaperError::NotPdf { .. })
     ));
     assert_eq!(h.engine.list_items(&ItemQuery::default()).unwrap().len(), 1);
+}
+
+#[test]
+fn citation_keys_are_given_once_kept_and_used_by_every_export() {
+    let h = harness();
+    let key = |id: &str| h.engine.item_detail(id).unwrap().citation_key;
+    let set_key = |id: &str, key: &str| {
+        h.engine.update_metadata(
+            id,
+            &MetadataPatch {
+                citation_key: Some(key.to_string()),
+                ..MetadataPatch::default()
+            },
+        )
+    };
+    let deep = block_on(h.engine.add_by_identifier("10.1038/nature14539"))
+        .unwrap()
+        .id;
+    assert_eq!(key(&deep).as_deref(), Some("lecun2015deep"));
+
+    // Papers that would share a key get the next free letters, past z.
+    let fields = ItemFields {
+        title: "Deep learning, again".into(),
+        creators: vec![Creator::person("Yann", "LeCun")],
+        year: Some(2015),
+        ..ItemFields::default()
+    };
+    let twins: Vec<String> = (0..27)
+        .map(|_| h.engine.create_item(&fields).unwrap().id)
+        .collect();
+    assert_eq!(key(&twins[0]).as_deref(), Some("lecun2015deepa"));
+    assert_eq!(key(&twins[25]).as_deref(), Some("lecun2015deepz"));
+    assert_eq!(key(&twins[26]).as_deref(), Some("lecun2015deepaa"));
+
+    // Edits leave the key alone; emptying it makes one from the edited metadata.
+    h.engine
+        .update_metadata(
+            &deep,
+            &MetadataPatch {
+                title: Some("Learning deep networks".into()),
+                ..MetadataPatch::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(key(&deep).as_deref(), Some("lecun2015deep"));
+    h.events.take();
+    set_key(&deep, "").unwrap();
+    assert_eq!(key(&deep).as_deref(), Some("lecun2015learning"));
+    assert_eq!(h.events.take(), [Event::Items(vec![deep.clone()])]);
+
+    // A key the user types must be free in any case and fit in \cite{}.
+    assert!(matches!(
+        set_key(&twins[0], "LeCun2015Learning"),
+        Err(PaperError::Library { .. })
+    ));
+    assert!(matches!(
+        set_key(&twins[0], "two words"),
+        Err(PaperError::Library { .. })
+    ));
+    assert_eq!(key(&twins[0]).as_deref(), Some("lecun2015deepa"));
+    set_key(&twins[0], " lecun:again ").unwrap();
+    assert_eq!(key(&twins[0]).as_deref(), Some("lecun:again"));
+
+    // A paper in the trash holds on to its key, so undo brings it back.
+    h.engine.delete_items(std::slice::from_ref(&deep)).unwrap();
+    assert!(set_key(&twins[1], "lecun2015learning").is_err());
+    h.engine.undo_delete().unwrap();
+    assert_eq!(key(&deep).as_deref(), Some("lecun2015learning"));
+
+    // Entries come sorted by key, whatever order the ids are in.
+    let bib = h.engine.bibtex(&[deep.clone(), twins[1].clone()]).unwrap();
+    let starts: Vec<&str> = bib.lines().filter(|line| line.starts_with('@')).collect();
+    assert_eq!(
+        starts,
+        ["@misc{lecun2015deepb,", "@article{lecun2015learning,"]
+    );
+    assert!(bib.contains("  title = {Learning deep networks},\n  journal = {Nature},\n"));
+
+    let path = h._dir.path().join("refs.bib");
+    let written = block_on(h.engine.export_bib(
+        &[deep.clone(), twins[1].clone(), deep.clone()],
+        path.to_str().unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(written, 2, "an id listed twice is one entry");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), bib);
+
+    let apa = block_on(
+        h.engine
+            .citation(std::slice::from_ref(&deep), CitationStyle::Apa),
+    )
+    .unwrap();
+    assert_eq!(
+        apa.text,
+        "LeCun, Y., Bengio, Y., & Hinton, G. (2015). Learning deep networks. Nature, 521(7553), 436–444. https://doi.org/10.1038/nature14539"
+    );
 }

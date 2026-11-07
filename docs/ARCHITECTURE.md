@@ -16,7 +16,7 @@ paper/
 │   ├── paper-ids/             DOI and arXiv parsing and normalization
 │   ├── paper-fetch/           Crossref, OpenAlex, Unpaywall, arXiv, PMC clients and the lookup pipeline
 │   ├── paper-identify/        reads the first pages of a PDF (pdf_oxide) and ranks its DOI and arXiv candidates
-│   ├── paper-cite/            BibTeX and CSL output (hayagriva, biblatex)
+│   ├── paper-cite/            citation keys, BibTeX, and CSL output (hayagriva)
 │   ├── paper-engine/          the public API: Engine, commands, view models, observer, threads
 │   ├── paper-ffi/             UniFFI exports of paper-engine, builds the static library
 │   └── paper-pdf/             PDFium worker for the later Windows and Linux apps, not built on macOS
@@ -66,11 +66,17 @@ Dependency direction is strictly `paper-ffi` → `paper-engine` → (`paper-core
 | Attachments | `attachment_file(id) -> AttachmentFile` (absolute path, last page, last zoom), `set_reading_position(id, page, zoom)`, `attach_file(item_id, path)`, `find_pdf(item_id)`, `first_figure(id) -> Option<Figure>` | `first_figure` says where a PDF's first figure is, for the paper's preview picture: the drawings and images above the "Figure 1" caption in the first four pages, or else the largest embedded image. The app draws that region with PDFKit and caches it under `cache/previews/`. A finished `add_by_identifier` starts `find_pdf` on its own, and the app follows it through `pdf_progress` and `pdf_step`. `find_pdf` returns the PDF the item already has without touching the network, fails with `PdfNotFound` when no source offers one, and allows one search per item at a time. Zoom 0 means fit width. |
 | Annotations | `annotations(attachment_id) -> Vec<Annotation>`, `create_annotation(New)`, `update_annotation(id, Patch)`, `delete_annotation(id)`, `import_embedded(attachment_id, Vec<New>)` | Geometry is in PDF user space, see below. |
 | Notes | `note(item_id)`, `save_note(item_id, markdown)` | Autosave calls `save_note` with a debounce in the app. |
-| Citations | `bibtex(ids) -> String`, `citation(ids, style) -> String`, `export_bib(ids, path)` | |
+| Citations | `bibtex(ids) -> String`, `citation(ids, CitationStyle) -> Citation`, `export_bib(ids, path) -> u32` | Entries come sorted by citation key, and an id listed twice is cited once. `citation` returns the style's reference list as plain text and as HTML with the style's italics, for a rich paste; `CitationStyle` is `Apa` for now. `export_bib` writes the `.bib` file on an engine thread and returns the entry count. See Citation keys below. |
 | Settings | `settings()`, `update_settings(Patch)` | Contact email, OpenAlex key, Anthropic key, window state, panel sizes. |
 | Events | `set_observer(Arc<dyn EngineObserver>)` with `items_changed(ids)`, `collections_changed()`, `tags_changed()`, `lookup_progress(item_id, LookupStatus)`, `pdf_progress(item_id, PdfStatus)`, `pdf_step(item_id, PdfStep)` (the source being asked, or bytes downloaded of the total, at most every 50 ms) | A foreign trait the app implements. An event caused by a synchronous call arrives on the caller's thread before that call returns; everything a lookup does after it leaves for the network (database writes and events) runs on an engine thread, so the app hops to the main thread asynchronously, never with a blocking dispatch. Errors are not events: every `async fn` returns its own `PaperError`, and lookup errors carry the id of the row they left behind. |
 
 Rules for the API. Reads that the UI needs on every keystroke or scroll, such as `list_items`, are synchronous and return in a few milliseconds from the database. Anything that touches the network or takes more than a few milliseconds is an `async fn` that completes a UniFFI future on the engine's thread pool. Records are plain data (`ItemRow`, `ItemDetail`, `CollectionNode`, `Annotation`, `AttachmentFile`), enums are closed sets (`ItemKind`, `AnnotationKind`, `LookupStatus`, `SortColumn`), errors are one `PaperError` enum with a variant per subsystem, and no method returns a handle that the caller must keep alive except `Engine` itself. The app subscribes once with `set_observer`, so nothing in the engine ever calls back into the UI toolkit.
+
+## Citation keys
+
+Every paper gets a citation key, such as `vaswani2017attention`: the first author's family name, the year, and the first title word that is not a stop word, folded to lowercase ASCII (`Müller` → `muller`). A missing part is left out, and a paper with nothing usable is `paper`. When another paper has the key in any case, the next free of `a` to `z`, `aa`, ... is appended (`lecun2015deep`, `lecun2015deepa`).
+
+A key is given once, when the paper's metadata is in: at the end of a lookup or an import, when a paper is typed in, and for older libraries when the library opens. From then on it never changes by itself, so a `.bib` file and the documents that cite it stay in step when metadata is edited or looked up again. The user can type a key in the metadata editor (it must be free in any case, and may not contain whitespace or `,{}()"#%'=\~`), and clearing the field makes a new key from the metadata as it is then. A paper in the trash keeps its key, so undo brings it back unchanged. A paper whose lookup is still running is cited under the key it would get, without storing it. `paper-cite` makes the key and writes BibTeX and CSL output as pure functions; `paper-core` stores the key in `items.citation_key` and picks the free suffix.
 
 ## Identifying a PDF
 
@@ -120,7 +126,7 @@ CREATE TABLE items (
   language TEXT,
   oa_status TEXT,                  -- gold | hybrid | green | bronze | closed | unknown
   cited_by_count INTEGER,
-  citation_key TEXT UNIQUE,
+  citation_key TEXT UNIQUE,        -- unique without regard to case (migration 2)
   lookup_status TEXT NOT NULL,     -- pending | done | failed
   extra TEXT,                      -- JSON for fields with no column yet
   created_at TEXT NOT NULL, modified_at TEXT NOT NULL, deleted_at TEXT
@@ -259,7 +265,7 @@ One `LibraryStore` object per open library wraps the `Engine`, implements `Engin
 
 Each library opens one `MainWindowController`. Its window hides the standard title and uses full size content so the custom 40 px tab bar can sit next to the traffic lights. The content is an `NSSplitViewController` with three items: `SidebarViewController` (an `NSOutlineView` with the smart lists, the collection tree, and the tags), a `TabContainerViewController` that owns the tab bar and swaps between one `LibraryViewController` (an `NSTableView` with view based cells, 44 px rows, and the columns from `docs/UI.md`) and one `ReaderViewController` per open PDF, and a right `NSHostingController` that shows the SwiftUI `ItemDetailPanel` for the library tab or the `ReaderSidePanel` (annotations, outline, notes) for a reader tab. Divider positions are saved through `update_settings`.
 
-User commands are selectors on the responder chain (`addByIdentifier:`, `importFile:`, `openSelected:`, `highlightSelection:`, `findInDocument:`, `copyBibtex:`, `copyCitation:`, `zoomIn:`, and so on). The main menu is built in code with the key equivalents from `docs/UI.md`, and the toolbar buttons, the SwiftUI buttons (`NSApp.sendAction`), and the command palette all send the same selectors, so there is one code path per command and menu items enable and disable themselves through `validateMenuItem`.
+User commands are selectors on the responder chain (`addByIdentifier:`, `importFile:`, `openSelected:`, `highlightSelection:`, `findInDocument:`, `copyBibtex:`, `copyCitation:`, `copyCitationKey:`, `exportBibtex:`, `zoomIn:`, and so on). The main menu is built in code with the key equivalents from `docs/UI.md`, and the toolbar buttons, the SwiftUI buttons (`NSApp.sendAction`), and the command palette all send the same selectors, so there is one code path per command and menu items enable and disable themselves through `validateMenuItem`.
 
 Error handling follows one rule. Engine crates return `Result<T, PaperError>` with `thiserror` variants per subsystem, flattened to one `PaperError` enum at the FFI, which UniFFI turns into a thrown Swift error. The app shows errors as a toast at the bottom right and logs them with `os.Logger`. Network failures during lookup leave the item in a `needs_lookup` state that a retry button clears.
 

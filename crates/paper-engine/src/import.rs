@@ -168,6 +168,7 @@ impl ImportJob {
         if !has_pdf {
             self.library.add_pdf(&target, bytes, None)?;
         }
+        crate::give_citation_keys(&self.library, std::slice::from_ref(&target));
         notify(&self.observer, |o| {
             o.lookup_progress(target.clone(), LookupStatus::Done)
         });

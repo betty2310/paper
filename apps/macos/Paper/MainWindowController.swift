@@ -365,6 +365,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             return store.pdfStatus[id] != .searching && store.pdfAttachment(itemId: id) == nil
         case #selector(attachPdf(_:)):
             return store.selectedItemIds.count == 1
+        case #selector(copyBibtex(_:)), #selector(copyCitation(_:)), #selector(exportBibtex(_:)):
+            return !citedItemIds.isEmpty
+        case #selector(copyCitationKey(_:)):
+            menuItem.title = citedItemIds.count > 1 ? "Copy Citation Keys" : "Copy Citation Key"
+            return !citedItemIds.isEmpty
         case #selector(revealPdf(_:)):
             return store.selectedItemIds.first.flatMap(store.pdfAttachment(itemId:)) != nil
         default:
@@ -589,6 +594,28 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     @objc func revealPdf(_ sender: Any?) {
         guard let id = store.selectedItemIds.first, let attachment = store.pdfAttachment(itemId: id) else { return }
         store.revealAttachment(id: attachment.id)
+    }
+
+    // MARK: Citations
+
+    /// The papers a citation command cites: the one in the front tab, or the
+    /// list's selection while the library is in front.
+    private var citedItemIds: [String] {
+        if let activeReader { return [activeReader.itemId] }
+        return store.selectedItemIds
+    }
+
+    @objc func copyBibtex(_ sender: Any?) { store.copyBibtex(itemIds: citedItemIds) }
+    @objc func copyCitation(_ sender: Any?) { store.copyCitation(itemIds: citedItemIds) }
+    @objc func copyCitationKey(_ sender: Any?) { store.copyCitationKeys(itemIds: citedItemIds) }
+
+    /// One paper's file is named after its key, several after the list.
+    @objc func exportBibtex(_ sender: Any?) {
+        let ids = citedItemIds
+        let name = ids.count == 1
+            ? (try? store.engine.itemDetail(id: ids[0]))?.citationKey ?? "Paper"
+            : scopeTitle(store.scope)
+        store.exportBibtex(itemIds: ids, name: name)
     }
 
     /// The library's toolbar buttons show only while the library is in front.

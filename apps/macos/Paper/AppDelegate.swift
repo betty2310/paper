@@ -266,6 +266,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         newCollectionItem.keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(withTitle: "New Subcollection", action: #selector(MainWindowController.newSubcollection(_:)), keyEquivalent: "")
         fileMenu.addItem(.separator())
+        let exportItem = fileMenu.addItem(withTitle: "Export BibTeX…", action: #selector(MainWindowController.exportBibtex(_:)), keyEquivalent: "e")
+        exportItem.keyEquivalentModifierMask = [.command, .shift]
+        fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Reveal Library in Finder", action: #selector(MainWindowController.revealLibraryInFinder(_:)), keyEquivalent: "")
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
@@ -294,6 +297,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         paperMenu.addItem(withTitle: "Find PDF", action: #selector(MainWindowController.findPdf(_:)), keyEquivalent: "")
         paperMenu.addItem(withTitle: "Attach PDF…", action: #selector(MainWindowController.attachPdf(_:)), keyEquivalent: "")
         paperMenu.addItem(withTitle: "Reveal PDF in Finder", action: #selector(MainWindowController.revealPdf(_:)), keyEquivalent: "")
+        paperMenu.addItem(.separator())
+        let bibtexItem = paperMenu.addItem(withTitle: "Copy BibTeX", action: #selector(MainWindowController.copyBibtex(_:)), keyEquivalent: "b")
+        bibtexItem.keyEquivalentModifierMask = [.command, .option]
+        let citationItem = paperMenu.addItem(withTitle: "Copy APA Citation", action: #selector(MainWindowController.copyCitation(_:)), keyEquivalent: "c")
+        citationItem.keyEquivalentModifierMask = [.command, .shift]
+        paperMenu.addItem(withTitle: "Copy Citation Key", action: #selector(MainWindowController.copyCitationKey(_:)), keyEquivalent: "")
         paperMenu.addItem(.separator())
         paperMenu.addItem(withTitle: "Copy DOI", action: #selector(PaperListViewController.copyDOI(_:)), keyEquivalent: "")
         paperMenu.addItem(withTitle: "Open Publisher Page", action: #selector(PaperListViewController.openPublisherPage(_:)), keyEquivalent: "")
