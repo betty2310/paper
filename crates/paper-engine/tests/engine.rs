@@ -718,6 +718,82 @@ fn libraries_are_remembered_and_reopen_with_their_data() {
     );
 }
 
+#[test]
+fn favorites_are_listed_first_and_reported_as_changed() {
+    let h = harness();
+    let alpha = h
+        .engine
+        .create_item(&ItemFields {
+            title: "Alpha".into(),
+            ..ItemFields::default()
+        })
+        .unwrap();
+    let second = h
+        .engine
+        .create_item(&ItemFields {
+            title: "Beta".into(),
+            ..ItemFields::default()
+        })
+        .unwrap();
+    h.events.take();
+    let by_title = ItemQuery {
+        sort: paper_engine::SortColumn::Title,
+        ascending: true,
+        ..ItemQuery::default()
+    };
+    let titles = || -> Vec<String> {
+        h.engine
+            .list_items(&by_title)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.title)
+            .collect()
+    };
+    assert_eq!(titles(), ["Alpha", "Beta"]);
+
+    h.engine
+        .set_favorite(std::slice::from_ref(&second.id), true)
+        .unwrap();
+    assert_eq!(h.events.take(), [Event::Items(vec![second.id.clone()])]);
+    assert_eq!(titles(), ["Beta", "Alpha"]);
+    h.engine
+        .set_favorite(std::slice::from_ref(&second.id), true)
+        .unwrap();
+    assert!(
+        h.events.take().is_empty(),
+        "nothing changed, nothing reported"
+    );
+
+    h.engine
+        .set_favorite(std::slice::from_ref(&second.id), false)
+        .unwrap();
+    assert_eq!(titles(), ["Alpha", "Beta"]);
+    let rows = h.engine.list_items(&by_title).unwrap();
+    assert_eq!(rows[0].id, alpha.id);
+    assert!(!rows[1].favorite);
+}
+
+#[test]
+fn pinned_tabs_are_remembered_per_library() {
+    let dir = tempfile::tempdir().unwrap();
+    let options = || EngineOptions {
+        settings_dir: Some(dir.path().join("settings")),
+        http: None,
+        manual_pdf_search: true,
+    };
+    let a = Engine::create_library_with(dir.path().join("A"), options()).unwrap();
+    let b = Engine::create_library_with(dir.path().join("B"), options()).unwrap();
+    a.set_pinned_tabs(vec!["one".into(), "two".into()]).unwrap();
+    assert!(b.pinned_tabs().is_empty());
+    // B saving its layout keeps A's pins.
+    b.update_settings(b.settings()).unwrap();
+    a.close();
+    b.close();
+
+    let reopened = Engine::open_library_with(dir.path().join("A"), options()).unwrap();
+    assert_eq!(reopened.pinned_tabs(), ["one", "two"]);
+}
+
 const ARXIV_PDF_ATTENTION: &str = "https://arxiv.org/pdf/1706.03762v7";
 const OPENALEX_DEEP_LEARNING: &str =
     "https://api.openalex.org/works/https://doi.org/10.1038/nature14539";

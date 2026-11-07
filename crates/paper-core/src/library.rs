@@ -25,6 +25,7 @@ pub const RECENTLY_ADDED_DAYS: i64 = 30;
 const MIGRATIONS: &[&str] = &[
     include_str!("migrations/001_initial.sql"),
     include_str!("migrations/002_citation_keys.sql"),
+    include_str!("migrations/003_favorites.sql"),
 ];
 
 /// Separator for names packed into one SQL string column.
@@ -493,6 +494,7 @@ impl Library {
     }
 
     /// The rows of the library table for `query`. One SQL statement.
+    /// Favorites come first whatever the sort, each group in the sort order.
     pub fn list_items(&self, query: &ItemQuery) -> Result<Vec<ItemRow>> {
         let conn = self.conn.lock().unwrap();
         let mut clauses = vec!["i.deleted_at IS NULL".to_string()];
@@ -539,7 +541,7 @@ impl Library {
             SortColumn::Added => "i.created_at",
         };
         let sql = format!(
-            "{ITEM_ROW_SELECT} WHERE {} ORDER BY {key} {direction} NULLS LAST, i.created_at DESC, i.id",
+            "{ITEM_ROW_SELECT} WHERE {} ORDER BY i.favorite DESC, {key} {direction} NULLS LAST, i.created_at DESC, i.id",
             clauses.join(" AND ")
         );
         let mut statement = conn.prepare_cached(&sql)?;
@@ -871,6 +873,27 @@ impl Library {
         reindex(&tx, item_id)?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// Marks live items as favorites or clears the mark. Returns the ids
+    /// that changed; unknown, deleted, and unchanged items are skipped.
+    pub fn set_favorite(&self, ids: &[String], favorite: bool) -> Result<Vec<String>> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let now = time::now();
+        let mut changed = Vec::new();
+        for id in ids {
+            let count = tx.execute(
+                "UPDATE items SET favorite = ?2, modified_at = ?3
+                 WHERE id = ?1 AND deleted_at IS NULL AND favorite != ?2",
+                params![id, favorite, now],
+            )?;
+            if count > 0 {
+                changed.push(id.clone());
+            }
+        }
+        tx.commit()?;
+        Ok(changed)
     }
 
     /// Sets or clears a tag's `#RRGGBB` color.
@@ -1346,7 +1369,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// The columns of `ItemRow`, plus `first_author` for sorting.
 const ITEM_ROW_SELECT: &str = "
     SELECT i.id, i.kind, i.title, i.container_short, i.container_title, i.year, i.doi,
-           i.lookup_status, i.created_at,
+           i.lookup_status, i.created_at, i.favorite,
            (SELECT group_concat(coalesce(family, literal, given), char(31) ORDER BY position)
             FROM creators c WHERE c.item_id = i.id AND c.role = 'author') AS author_names,
            (SELECT coalesce(family, literal, given) FROM creators c
@@ -1368,6 +1391,7 @@ fn read_item_row(row: &Row<'_>) -> rusqlite::Result<ItemRow> {
         year: row.get("year")?,
         doi: row.get("doi")?,
         has_pdf: row.get("has_pdf")?,
+        favorite: row.get("favorite")?,
         lookup_status: LookupStatus::from_db(&row.get::<_, String>("lookup_status")?),
         added_at: time::parse(&row.get::<_, String>("created_at")?),
     })
@@ -1867,6 +1891,82 @@ mod tests {
                 "Deep learning",
                 "Attention Is All You Need"
             ]
+        );
+    }
+
+    #[test]
+    fn favorites_come_first_in_every_sort_and_scope() {
+        let (library, deep, attention, xgboost) = seeded();
+        let changed = library
+            .set_favorite(&[xgboost.clone(), deep.clone(), "missing".into()], true)
+            .unwrap();
+        assert_eq!(changed, [xgboost.clone(), deep.clone()]);
+        assert!(
+            library
+                .set_favorite(std::slice::from_ref(&deep), true)
+                .unwrap()
+                .is_empty(),
+            "an item that is already a favorite does not change"
+        );
+        let by = |sort, ascending, scope| ItemQuery {
+            sort,
+            ascending,
+            scope,
+            ..ItemQuery::default()
+        };
+        // Each group keeps the sort order, missing years last.
+        assert_eq!(
+            titles(&library, &by(SortColumn::Year, false, Scope::All)),
+            [
+                "Deep learning",
+                "XGBoost: A Scalable Tree Boosting System",
+                "Attention Is All You Need"
+            ]
+        );
+        assert_eq!(
+            titles(&library, &by(SortColumn::Title, true, Scope::All)),
+            [
+                "Deep learning",
+                "XGBoost: A Scalable Tree Boosting System",
+                "Attention Is All You Need"
+            ]
+        );
+        assert_eq!(
+            titles(&library, &by(SortColumn::Title, false, Scope::All)),
+            [
+                "XGBoost: A Scalable Tree Boosting System",
+                "Deep learning",
+                "Attention Is All You Need"
+            ]
+        );
+        let collection = library.create_collection("Reading", None).unwrap();
+        library
+            .add_to_collection(&collection, &[attention.clone(), xgboost.clone()])
+            .unwrap();
+        assert_eq!(
+            titles(
+                &library,
+                &by(
+                    SortColumn::Title,
+                    true,
+                    Scope::Collection { id: collection }
+                )
+            ),
+            [
+                "XGBoost: A Scalable Tree Boosting System",
+                "Attention Is All You Need"
+            ]
+        );
+        assert!(library.item_row(&xgboost).unwrap().favorite);
+        assert!(!library.item_row(&attention).unwrap().favorite);
+
+        library
+            .set_favorite(std::slice::from_ref(&xgboost), false)
+            .unwrap();
+        assert!(!library.item_row(&xgboost).unwrap().favorite);
+        assert_eq!(
+            titles(&library, &by(SortColumn::Title, true, Scope::All))[0],
+            "Deep learning"
         );
     }
 

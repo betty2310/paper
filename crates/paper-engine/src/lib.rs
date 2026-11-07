@@ -710,6 +710,17 @@ impl Engine {
         Ok(())
     }
 
+    /// Marks papers as favorites, which every list shows first, or clears
+    /// the mark.
+    pub fn set_favorite(&self, item_ids: &[String], favorite: bool) -> Result<()> {
+        self.ensure_open()?;
+        let changed = self.library.set_favorite(item_ids, favorite)?;
+        if !changed.is_empty() {
+            self.notify(|observer| observer.items_changed(changed));
+        }
+        Ok(())
+    }
+
     pub fn set_tag_color(&self, tag_id: &str, color: Option<&str>) -> Result<()> {
         self.ensure_open()?;
         self.library.set_tag_color(tag_id, color)?;
@@ -830,6 +841,16 @@ impl Engine {
     /// Libraries opened on this machine, most recent first.
     pub fn recent_libraries(&self) -> Vec<String> {
         self.settings.recent_libraries()
+    }
+
+    /// The item ids of this library's pinned reader tabs, in tab order. They
+    /// are machine settings like the window layout, kept per library.
+    pub fn pinned_tabs(&self) -> Vec<String> {
+        self.settings.pinned_tabs(self.library.dir())
+    }
+
+    pub fn set_pinned_tabs(&self, item_ids: Vec<String>) -> Result<()> {
+        self.settings.set_pinned_tabs(self.library.dir(), item_ids)
     }
 
     // ----- internals -----

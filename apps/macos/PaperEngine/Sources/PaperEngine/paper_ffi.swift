@@ -716,6 +716,8 @@ public protocol EngineProtocol: AnyObject, Sendable {
     
     func note(itemId: String) throws  -> String?
     
+    func pinnedTabs()  -> [String]
+    
     func recentLibraries()  -> [String]
     
     func removeFromCollection(collectionId: String, itemIds: [String]) throws 
@@ -726,7 +728,11 @@ public protocol EngineProtocol: AnyObject, Sendable {
     
     func saveNote(itemId: String, markdown: String) throws 
     
+    func setFavorite(itemIds: [String], favorite: Bool) throws 
+    
     func setObserver(observer: EngineObserver) 
+    
+    func setPinnedTabs(itemIds: [String]) throws 
     
     func setReadingPosition(id: String, page: Int32, zoom: Double) throws 
     
@@ -1104,6 +1110,15 @@ open func note(itemId: String)throws  -> String?  {
 })
 }
     
+open func pinnedTabs() -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engine_pinned_tabs(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
 open func recentLibraries() -> [String]  {
     return try!  FfiConverterSequenceString.lift(try! rustCall() {
         uniffiCallStatus in
@@ -1159,11 +1174,30 @@ open func saveNote(itemId: String, markdown: String)throws   {try rustCallWithEr
 }
 }
     
+open func setFavorite(itemIds: [String], favorite: Bool)throws   {try rustCallWithError(FfiConverterTypePaperError_lift) {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engine_set_favorite(
+            self.uniffiCloneHandle(),
+        FfiConverterSequenceString.lower(itemIds),
+        FfiConverterBool.lower(favorite),uniffiCallStatus
+    )
+}
+}
+    
 open func setObserver(observer: EngineObserver)  {try! rustCall() {
         uniffiCallStatus in
     uniffi_paper_ffi_fn_method_engine_set_observer(
             self.uniffiCloneHandle(),
         FfiConverterTypeEngineObserver_lower(observer),uniffiCallStatus
+    )
+}
+}
+    
+open func setPinnedTabs(itemIds: [String])throws   {try rustCallWithError(FfiConverterTypePaperError_lift) {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engine_set_pinned_tabs(
+            self.uniffiCloneHandle(),
+        FfiConverterSequenceString.lower(itemIds),uniffiCallStatus
     )
 }
 }
@@ -2555,12 +2589,13 @@ public struct ItemRow: Equatable, Hashable {
     public var year: Int32?
     public var doi: String?
     public var hasPdf: Bool
+    public var favorite: Bool
     public var lookupStatus: LookupStatus
     public var addedAt: Date
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, kind: ItemKind, title: String, authors: String, journal: String?, year: Int32?, doi: String?, hasPdf: Bool, lookupStatus: LookupStatus, addedAt: Date) {
+    public init(id: String, kind: ItemKind, title: String, authors: String, journal: String?, year: Int32?, doi: String?, hasPdf: Bool, favorite: Bool, lookupStatus: LookupStatus, addedAt: Date) {
         self.id = id
         self.kind = kind
         self.title = title
@@ -2569,6 +2604,7 @@ public struct ItemRow: Equatable, Hashable {
         self.year = year
         self.doi = doi
         self.hasPdf = hasPdf
+        self.favorite = favorite
         self.lookupStatus = lookupStatus
         self.addedAt = addedAt
     }
@@ -2597,6 +2633,7 @@ public struct FfiConverterTypeItemRow: FfiConverterRustBuffer {
                 year: FfiConverterOptionInt32.read(from: &buf), 
                 doi: FfiConverterOptionString.read(from: &buf), 
                 hasPdf: FfiConverterBool.read(from: &buf), 
+                favorite: FfiConverterBool.read(from: &buf), 
                 lookupStatus: FfiConverterTypeLookupStatus.read(from: &buf), 
                 addedAt: FfiConverterTimestamp.read(from: &buf)
         )
@@ -2611,6 +2648,7 @@ public struct FfiConverterTypeItemRow: FfiConverterRustBuffer {
         FfiConverterOptionInt32.write(value.year, into: &buf)
         FfiConverterOptionString.write(value.doi, into: &buf)
         FfiConverterBool.write(value.hasPdf, into: &buf)
+        FfiConverterBool.write(value.favorite, into: &buf)
         FfiConverterTypeLookupStatus.write(value.lookupStatus, into: &buf)
         FfiConverterTimestamp.write(value.addedAt, into: &buf)
     }
@@ -4879,6 +4917,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_paper_ffi_checksum_method_engine_note() != 63485) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_paper_ffi_checksum_method_engine_pinned_tabs() != 29488) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_paper_ffi_checksum_method_engine_recent_libraries() != 31624) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -4894,7 +4935,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_paper_ffi_checksum_method_engine_save_note() != 46797) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_paper_ffi_checksum_method_engine_set_favorite() != 61757) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_paper_ffi_checksum_method_engine_set_observer() != 53040) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paper_ffi_checksum_method_engine_set_pinned_tabs() != 22835) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_set_reading_position() != 20486) {

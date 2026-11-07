@@ -216,6 +216,7 @@ pub struct ItemRow {
     pub year: Option<i32>,
     pub doi: Option<String>,
     pub has_pdf: bool,
+    pub favorite: bool,
     pub lookup_status: LookupStatus,
     pub added_at: SystemTime,
 }
@@ -622,6 +623,10 @@ impl Engine {
         self.0.set_tags(&item_id, &names)
     }
 
+    pub fn set_favorite(&self, item_ids: Vec<String>, favorite: bool) -> Result<(), PaperError> {
+        self.0.set_favorite(&item_ids, favorite)
+    }
+
     pub fn set_tag_color(&self, tag_id: String, color: Option<String>) -> Result<(), PaperError> {
         self.0.set_tag_color(&tag_id, color.as_deref())
     }
@@ -666,5 +671,13 @@ impl Engine {
 
     pub fn recent_libraries(&self) -> Vec<String> {
         self.0.recent_libraries()
+    }
+
+    pub fn pinned_tabs(&self) -> Vec<String> {
+        self.0.pinned_tabs()
+    }
+
+    pub fn set_pinned_tabs(&self, item_ids: Vec<String>) -> Result<(), PaperError> {
+        self.0.set_pinned_tabs(item_ids)
     }
 }

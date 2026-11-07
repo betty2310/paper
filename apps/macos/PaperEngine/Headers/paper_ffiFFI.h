@@ -444,6 +444,11 @@ void uniffi_paper_ffi_fn_method_engine_move_collection(uint64_t ptr, RustBuffer 
 RustBuffer uniffi_paper_ffi_fn_method_engine_note(uint64_t ptr, RustBuffer item_id, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_PINNED_TABS
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_PINNED_TABS
+RustBuffer uniffi_paper_ffi_fn_method_engine_pinned_tabs(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_RECENT_LIBRARIES
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_RECENT_LIBRARIES
 RustBuffer uniffi_paper_ffi_fn_method_engine_recent_libraries(uint64_t ptr, RustCallStatus *_Nonnull out_status
@@ -469,9 +474,19 @@ uint64_t uniffi_paper_ffi_fn_method_engine_retry_lookup(uint64_t ptr, RustBuffer
 void uniffi_paper_ffi_fn_method_engine_save_note(uint64_t ptr, RustBuffer item_id, RustBuffer markdown, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SET_FAVORITE
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SET_FAVORITE
+void uniffi_paper_ffi_fn_method_engine_set_favorite(uint64_t ptr, RustBuffer item_ids, int8_t favorite, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SET_OBSERVER
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SET_OBSERVER
 void uniffi_paper_ffi_fn_method_engine_set_observer(uint64_t ptr, uint64_t observer, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SET_PINNED_TABS
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SET_PINNED_TABS
+void uniffi_paper_ffi_fn_method_engine_set_pinned_tabs(uint64_t ptr, RustBuffer item_ids, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SET_READING_POSITION
@@ -1020,6 +1035,12 @@ uint16_t uniffi_paper_ffi_checksum_method_engine_note(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_PINNED_TABS
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_PINNED_TABS
+uint16_t uniffi_paper_ffi_checksum_method_engine_pinned_tabs(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_RECENT_LIBRARIES
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_RECENT_LIBRARIES
 uint16_t uniffi_paper_ffi_checksum_method_engine_recent_libraries(void
@@ -1050,9 +1071,21 @@ uint16_t uniffi_paper_ffi_checksum_method_engine_save_note(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_SET_FAVORITE
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_SET_FAVORITE
+uint16_t uniffi_paper_ffi_checksum_method_engine_set_favorite(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_SET_OBSERVER
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_SET_OBSERVER
 uint16_t uniffi_paper_ffi_checksum_method_engine_set_observer(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_SET_PINNED_TABS
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_SET_PINNED_TABS
+uint16_t uniffi_paper_ffi_checksum_method_engine_set_pinned_tabs(void
     
 );
 #endif

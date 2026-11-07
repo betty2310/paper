@@ -190,6 +190,8 @@ pub struct ItemRow {
     pub year: Option<i32>,
     pub doi: Option<String>,
     pub has_pdf: bool,
+    /// Favorites are listed above the other papers in every view.
+    pub favorite: bool,
     pub lookup_status: LookupStatus,
     pub added_at: SystemTime,
 }

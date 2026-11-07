@@ -4,6 +4,7 @@
 //! be shared between machines without sharing one machine's window size or
 //! API keys.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -47,14 +48,16 @@ pub struct Settings {
     pub detail_collapsed: bool,
 }
 
-/// What is written to disk: the settings plus the recent library list, which
-/// the engine maintains itself.
+/// What is written to disk: the settings plus the lists the engine
+/// maintains itself, the recent libraries and each library's pinned tabs.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 struct SettingsFile {
     #[serde(flatten)]
     settings: Settings,
     recent_libraries: Vec<String>,
+    /// Library path to the item ids of its pinned reader tabs, in tab order.
+    pinned_tabs: BTreeMap<String, Vec<String>>,
 }
 
 /// Reads and writes `settings.json`. Every write goes to disk at once.
@@ -80,16 +83,7 @@ impl SettingsStore {
     /// replaces it.
     pub fn open(dir: impl AsRef<Path>) -> SettingsStore {
         let path = dir.as_ref().join(FILE_NAME);
-        let file = fs::read_to_string(&path)
-            .ok()
-            .and_then(|text| match serde_json::from_str::<SettingsFile>(&text) {
-                Ok(file) => Some(file),
-                Err(error) => {
-                    tracing::warn!(path = %path.display(), %error, "ignoring unreadable settings");
-                    None
-                }
-            })
-            .unwrap_or_default();
+        let file = read(&path).unwrap_or_default();
         SettingsStore {
             path,
             file: Mutex::new(file),
@@ -105,7 +99,7 @@ impl SettingsStore {
     }
 
     pub fn update_settings(&self, settings: Settings) -> Result<(), PaperError> {
-        let mut file = self.file.lock().unwrap();
+        let mut file = self.fresh();
         file.settings = settings;
         self.write(&file)
     }
@@ -118,7 +112,7 @@ impl SettingsStore {
     /// Moves `path` to the front of the recent list.
     pub fn remember_library(&self, path: &Path) -> Result<(), PaperError> {
         let text = path.to_string_lossy().into_owned();
-        let mut file = self.file.lock().unwrap();
+        let mut file = self.fresh();
         file.recent_libraries.retain(|known| *known != text);
         file.recent_libraries.insert(0, text);
         file.recent_libraries.truncate(MAX_RECENT_LIBRARIES);
@@ -128,9 +122,42 @@ impl SettingsStore {
     /// Removes a library that no longer exists from the recent list.
     pub fn forget_library(&self, path: &Path) -> Result<(), PaperError> {
         let text = path.to_string_lossy().into_owned();
-        let mut file = self.file.lock().unwrap();
+        let mut file = self.fresh();
         file.recent_libraries.retain(|known| *known != text);
         self.write(&file)
+    }
+
+    /// The item ids of the library's pinned reader tabs, in tab order.
+    pub fn pinned_tabs(&self, library: &Path) -> Vec<String> {
+        let key = library.to_string_lossy();
+        let file = self.fresh();
+        file.pinned_tabs
+            .get(key.as_ref())
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Replaces the library's pinned tabs. An empty list forgets the library.
+    pub fn set_pinned_tabs(&self, library: &Path, item_ids: Vec<String>) -> Result<(), PaperError> {
+        let key = library.to_string_lossy().into_owned();
+        let mut file = self.fresh();
+        if item_ids.is_empty() {
+            file.pinned_tabs.remove(&key);
+        } else {
+            file.pinned_tabs.insert(key, item_ids);
+        }
+        self.write(&file)
+    }
+
+    /// The file as it is on disk now, locked for a change. Each open library
+    /// has its own store on the same file, so a change starts from what the
+    /// others wrote rather than from this store's copy.
+    fn fresh(&self) -> std::sync::MutexGuard<'_, SettingsFile> {
+        let mut file = self.file.lock().unwrap();
+        if let Some(disk) = read(&self.path) {
+            *file = disk;
+        }
+        file
     }
 
     fn write(&self, file: &SettingsFile) -> Result<(), PaperError> {
@@ -143,6 +170,18 @@ impl SettingsStore {
         fs::write(&temp, json)?;
         fs::rename(&temp, &self.path)?;
         Ok(())
+    }
+}
+
+/// The file at `path`, or `None` when it is missing or unreadable.
+fn read(path: &Path) -> Option<SettingsFile> {
+    let text = fs::read_to_string(path).ok()?;
+    match serde_json::from_str::<SettingsFile>(&text) {
+        Ok(file) => Some(file),
+        Err(error) => {
+            tracing::warn!(path = %path.display(), %error, "ignoring unreadable settings");
+            None
+        }
     }
 }
 
@@ -190,6 +229,39 @@ mod tests {
 
         store.forget_library(Path::new("lib19")).unwrap();
         assert_eq!(store.recent_libraries()[0], "lib18");
+    }
+
+    #[test]
+    fn pinned_tabs_are_kept_per_library_across_stores() {
+        let dir = tempfile::tempdir().unwrap();
+        // Two open libraries each have a store on the same file.
+        let first = SettingsStore::open(dir.path());
+        let second = SettingsStore::open(dir.path());
+        let (a, b) = (Path::new("/libraries/a"), Path::new("/libraries/b"));
+        first
+            .set_pinned_tabs(a, vec!["x".into(), "y".into()])
+            .unwrap();
+        second.set_pinned_tabs(b, vec!["z".into()]).unwrap();
+        second
+            .update_settings(Settings {
+                sidebar_width: Some(200.0),
+                ..second.settings()
+            })
+            .unwrap();
+        second.remember_library(b).unwrap();
+        assert_eq!(
+            first.pinned_tabs(a),
+            ["x", "y"],
+            "the other store's writes keep these pins"
+        );
+
+        let reopened = SettingsStore::open(dir.path());
+        assert_eq!(reopened.pinned_tabs(a), ["x", "y"]);
+        assert_eq!(reopened.pinned_tabs(b), ["z"]);
+        assert_eq!(reopened.settings().sidebar_width, Some(200.0));
+        reopened.set_pinned_tabs(a, Vec::new()).unwrap();
+        assert!(SettingsStore::open(dir.path()).pinned_tabs(a).is_empty());
+        assert_eq!(SettingsStore::open(dir.path()).pinned_tabs(b), ["z"]);
     }
 
     #[test]
