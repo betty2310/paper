@@ -1,0 +1,34 @@
+# Builds the release Rust library on main and saves its compiled dependencies
+# for release.yml. Release runs on tags cannot restore caches saved on other
+# tags, only those saved on main, so without this every release compiled all
+# dependencies from scratch.
+name: Rust cache
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.lock
+      - "**/Cargo.toml"
+      - scripts/build-xcframework.sh
+      - .github/workflows/rust-cache.yml
+  # GitHub evicts a cache after 7 days without use, and a runner image with a
+  # newer Rust changes the cache key.
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      # The same key as release.yml.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-macos
+
+      # The same cargo commands as the release, so the saved dependencies match.
+      - run: scripts/build-xcframework.sh release

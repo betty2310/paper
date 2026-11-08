@@ -19,7 +19,7 @@ After changing the engine API in `crates/paper-engine` and `crates/paper-ffi`, r
 
 ## Releases
 
-Pushing a tag such as `v0.2.0` runs [`.github/workflows/release.yml`](.github/workflows/release.yml) on a macOS runner. It calls `scripts/package-macos-app.sh 0.2.0`, which builds a universal `Paper.app`, signs it, zips it, and writes a Sparkle `appcast.xml`. Then it publishes both files as the GitHub release. The app checks `releases/latest/download/appcast.xml` once a day and offers the update. Paper › Check for Updates… checks right away. Sparkle installs an update only when the zip's EdDSA signature matches the public key built into the running app.
+Pushing a tag such as `v0.2.0` runs [`.github/workflows/release.yml`](.github/workflows/release.yml) on a macOS runner. It calls `scripts/package-macos-app.sh 0.2.0`, which builds a universal `Paper.app`, signs it, zips it, and writes a Sparkle `appcast.xml`. Then it publishes both files as the GitHub release. A tag run cannot restore caches that other tags saved, so [`.github/workflows/rust-cache.yml`](.github/workflows/rust-cache.yml) compiles the Rust dependencies on `main` (when a `Cargo.toml` or `Cargo.lock` changes, and weekly) and the release restores them. A tag pushed before that run finishes builds them from scratch. The app checks `releases/latest/download/appcast.xml` once a day and offers the update. Paper › Check for Updates… checks right away. Sparkle installs an update only when the zip's EdDSA signature matches the public key built into the running app.
 
 There is no Apple Developer ID yet. The app is signed with a self-signed certificate (or ad hoc if none is set up) and is not notarized.
 

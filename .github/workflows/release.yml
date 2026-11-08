@@ -27,7 +27,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # A tag run can restore caches saved on main but not those saved on
+      # other tags, so rust-cache.yml saves this cache on main and releases
+      # only read it.
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-macos
+          save-if: false
 
       - name: Check release settings
         env:
