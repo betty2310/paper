@@ -15,15 +15,19 @@ export MACOSX_DEPLOYMENT_TARGET=13.0
 cd "$root"
 rustup target add "${targets[@]}"
 
+# One cargo run for both targets, so one architecture's long single-threaded
+# steps (codegen of the largest crates, LTO of paper-ffi) overlap the other's.
+# A cold release build peaks near 7 GB when both targets compile pdf_oxide.
+args=(--package paper-ffi)
 libraries=()
 for target in "${targets[@]}"; do
-  if [[ "$profile" == release ]]; then
-    cargo build --package paper-ffi --target "$target" --release
-  else
-    cargo build --package paper-ffi --target "$target"
-  fi
+  args+=(--target "$target")
   libraries+=("$root/target/$target/$profile/libpaper_ffi.a")
 done
+if [[ "$profile" == release ]]; then
+  args+=(--release)
+fi
+cargo build "${args[@]}"
 
 universal="$root/target/universal-macos/$profile"
 mkdir -p "$universal"
