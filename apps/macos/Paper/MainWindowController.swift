@@ -261,6 +261,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         store.toggleFavorite(itemIds: favoriteTargets)
     }
 
+    /// Jev picks topics again for the paper in front or the selected papers.
+    @objc func tagWithTopics(_ sender: Any?) {
+        store.tagWithTopics(itemIds: favoriteTargets)
+    }
+
     private var panelObservers: [NSKeyValueObservation] = []
 
     /// Only the hidden flags: mid animation a panel's width is not the one
@@ -416,6 +421,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             let all = !ids.isEmpty && ids.allSatisfy(store.isFavorite(itemId:))
             menuItem.title = all ? "Remove from Favorites" : "Add to Favorites"
             return !ids.isEmpty
+        case #selector(tagWithTopics(_:)):
+            return !favoriteTargets.isEmpty
         case #selector(togglePinTab(_:)):
             menuItem.title = activeReader.map { pinnedIds.contains($0.itemId) } == true ? "Unpin Tab" : "Pin Tab"
             return activeReader != nil

@@ -39,6 +39,9 @@ pub struct Settings {
     /// does not print its identifier to a Claude model to read. Unset, PDFs
     /// never leave the machine.
     pub anthropic_api_key: String,
+    /// TypeSafe API key for Jev. When set, a paper that has been added gets
+    /// up to three tags from the library's topic list.
+    pub jev_api_key: String,
     pub window: Option<WindowState>,
     pub sidebar_width: Option<f64>,
     pub detail_width: Option<f64>,

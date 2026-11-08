@@ -35,10 +35,14 @@ struct Toast: Identifiable, Equatable {
     /// The paper the toast is about, on a second line in the title font.
     var subject: String?
     var action: Action?
+    /// The message may take a second line rather than be cut off, for
+    /// messages whose end matters, such as the tags added to a paper.
+    var wrapsMessage = false
 
     static func == (lhs: Toast, rhs: Toast) -> Bool {
         lhs.id == rhs.id && lhs.style == rhs.style && lhs.message == rhs.message
             && lhs.detail == rhs.detail && lhs.subject == rhs.subject && lhs.action?.title == rhs.action?.title
+            && lhs.wrapsMessage == rhs.wrapsMessage
     }
 
     /// The toast that follows a paper's lookup and PDF search.
@@ -128,8 +132,10 @@ struct ToastView: View {
         .padding(.vertical, Theme.Toast.verticalPadding)
         .frame(width: fixedWidth ? Theme.Toast.width : nil)
         .frame(minHeight: Theme.Toast.height)
-        .background(Theme.Color.swiftUIToastBackground, in: Capsule())
-        .overlay(Capsule().strokeBorder(Theme.Color.swiftUISeparator, lineWidth: 1 / displayScale))
+        // A capsule while the toast is one row tall; a wrapped toast keeps its round corners.
+        .background(Theme.Color.swiftUIToastBackground, in: RoundedRectangle(cornerRadius: Theme.Toast.cornerRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Toast.cornerRadius)
+            .strokeBorder(Theme.Color.swiftUISeparator, lineWidth: 1 / displayScale))
         .shadow(color: Theme.Toast.shadowColor, radius: Theme.Toast.shadowRadius, y: Theme.Toast.shadowY)
         .shadow(color: Theme.Toast.contactShadowColor, radius: Theme.Toast.contactShadowRadius, y: Theme.Toast.contactShadowY)
         .animation(Theme.Toast.contentAnimation, value: phase)
@@ -149,7 +155,8 @@ struct ToastView: View {
                         .foregroundStyle(Theme.Color.swiftUISecondaryText)
                 }
             }
-            .lineLimit(1)
+            .lineLimit(toast.wrapsMessage ? 2 : 1)
+            .fixedSize(horizontal: false, vertical: toast.wrapsMessage)
             if let subject = toast.subject {
                 Text(subject)
                     .font(Theme.Font.swiftUIToastSubject)

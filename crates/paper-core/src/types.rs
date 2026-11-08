@@ -288,6 +288,15 @@ pub struct Tag {
     pub item_count: i64,
 }
 
+/// An entry of the library's topic list. Automatic tags are named after
+/// topics, and the description tells the model what the topic covers and
+/// what it does not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Topic {
+    pub name: String,
+    pub description: String,
+}
+
 /// Everything the detail panel shows for one item.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemDetail {

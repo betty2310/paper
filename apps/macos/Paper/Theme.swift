@@ -82,6 +82,9 @@ enum Theme {
         /// The sheet that edits a paper's fields or takes a new paper's.
         static let metadataEditorWidth: CGFloat = 520
         static let metadataEditorHeight: CGFloat = 640
+        /// The sheet that edits the library's topic list.
+        static let topicsEditorWidth: CGFloat = 520
+        static let topicsEditorHeight: CGFloat = 560
         /// The title and subtitle at the start of the toolbar, placed where
         /// the system puts its own: baselines from the top and between lines.
         static let windowTitleHeight: CGFloat = 32
@@ -420,6 +423,7 @@ enum Theme {
     /// The floating toasts in the window's bottom right corner.
     enum Toast {
         static let height: CGFloat = 40
+        static let cornerRadius: CGFloat = height / 2
         static let iconSize: CGFloat = 18
         /// The action capsule's height and the close button's diameter.
         static let controlSize: CGFloat = 24
@@ -479,6 +483,8 @@ enum Theme {
         static let paper = "doc.text"
         static let edit = "pencil"
         static let delete = "trash"
+        static let removeTopic = "minus.circle"
+        static let addTopic = "plus"
         static let search = "magnifyingglass"
         static let showInList = "list.bullet"
         static let returnKey = "return"

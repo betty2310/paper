@@ -147,8 +147,15 @@ final class LibraryStore: ObservableObject {
             reloadCollections()
             reloadItems()
         case .tags:
+            // Tags Jev added on an engine thread have no color yet.
+            if (try? engine.tags())?.contains(where: { $0.color == nil }) == true {
+                try? colorNewTags()
+            }
             reloadTags()
             reloadDetail()
+        case .topicsAdded(let itemId, let tags):
+            show(Toast(id: Self.topicsToast(itemId), style: .done, message: Self.tagged(tags), subject: subject(itemId),
+                       wrapsMessage: true))
         case .pdf(let itemId, let status):
             pdfStatus[itemId] = status
             pdfChanged(itemId: itemId, status: status)
@@ -525,6 +532,52 @@ final class LibraryStore: ObservableObject {
         perform { try engine.setTagColor(tagId: tagId, color: color) }
     }
 
+    // MARK: Topics
+
+    /// The library's topic list, which automatic tags come from.
+    func topics() -> [Topic] {
+        (try? engine.topics()) ?? []
+    }
+
+    func setTopics(_ topics: [Topic]) throws {
+        try engine.setTopics(topics: topics)
+    }
+
+    /// Asks Jev again which topics the papers are about and adds the ones
+    /// they lack as tags. One toast follows the whole run.
+    func tagWithTopics(itemIds: [String]) {
+        guard !itemIds.isEmpty else { return }
+        let id = Self.topicsToast(itemIds.count == 1 ? itemIds[0] : "batch")
+        let single = itemIds.count == 1 ? subject(itemIds[0]) : nil
+        show(Toast(id: id, style: .working(progress: nil),
+                   message: itemIds.count == 1 ? "Choosing topics" : "Choosing topics for \(itemIds.count) papers",
+                   subject: single))
+        Task {
+            do {
+                let tagged = try await engine.tagWithTopics(itemIds: itemIds)
+                if itemIds.count == 1 {
+                    show(Toast(id: id, style: .done, message: tagged.first.map { Self.tagged($0.tags) } ?? "No new topics",
+                               subject: single, wrapsMessage: true))
+                } else {
+                    let tags = tagged.reduce(0) { $0 + $1.tags.count }
+                    show(Toast(id: id, style: .done, message: tagged.isEmpty
+                        ? "No new topics for \(itemIds.count) papers"
+                        : "Added \(tags) \(tags == 1 ? "tag" : "tags") to \(tagged.count) of \(itemIds.count) papers"))
+                }
+            } catch {
+                dismissToast(id: id)
+                report(error)
+            }
+        }
+    }
+
+    /// "Tagged Deep learning and Computer vision".
+    private static func tagged(_ tags: [String]) -> String {
+        "Tagged \(tags.formatted(.list(type: .and)))"
+    }
+
+    private static func topicsToast(_ itemId: String) -> String { "topics:\(itemId)" }
+
     /// The paper's Markdown note, including typing not yet saved.
     func note(itemId: String) -> String {
         if let pendingNote, pendingNote.itemId == itemId { return pendingNote.markdown }
@@ -813,6 +866,7 @@ final class ObserverBridge: EngineObserver, Sendable {
         case lookup(String, LookupStatus)
         case pdf(String, PdfStatus)
         case pdfStep(String, PdfStep)
+        case topicsAdded(String, [String])
     }
 
     private let forward: @Sendable (Event) -> Void
@@ -827,6 +881,7 @@ final class ObserverBridge: EngineObserver, Sendable {
     func lookupProgress(itemId: String, status: LookupStatus) { forward(.lookup(itemId, status)) }
     func pdfProgress(itemId: String, status: PdfStatus) { forward(.pdf(itemId, status)) }
     func pdfStep(itemId: String, step: PdfStep) { forward(.pdfStep(itemId, step)) }
+    func topicsAdded(itemId: String, tags: [String]) { forward(.topicsAdded(itemId, tags)) }
 }
 
 extension ItemRow {

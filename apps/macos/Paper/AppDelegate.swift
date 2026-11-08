@@ -305,6 +305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         paperMenu.addItem(withTitle: "Copy Citation Key", action: #selector(MainWindowController.copyCitationKey(_:)), keyEquivalent: "")
         paperMenu.addItem(.separator())
         paperMenu.addItem(withTitle: "Add to Favorites", action: #selector(MainWindowController.toggleFavorite(_:)), keyEquivalent: "d")
+        paperMenu.addItem(withTitle: "Tag with Topics", action: #selector(MainWindowController.tagWithTopics(_:)), keyEquivalent: "")
         paperMenu.addItem(.separator())
         paperMenu.addItem(withTitle: "Copy DOI", action: #selector(PaperListViewController.copyDOI(_:)), keyEquivalent: "")
         paperMenu.addItem(withTitle: "Open Publisher Page", action: #selector(PaperListViewController.openPublisherPage(_:)), keyEquivalent: "")

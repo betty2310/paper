@@ -10,6 +10,7 @@
 
 mod import;
 mod pool;
+mod topics;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -24,7 +25,7 @@ pub use paper_core::{
     Creator, CreatorRole, Figure, FigureSource, Identification, ImportedPdf, ItemDetail,
     ItemFields, ItemKind, ItemQuery, ItemRow, LookupStatus, MAX_RECENT_LIBRARIES, MetadataPatch,
     NewAnnotation, PagePoint, PageRect, PaperError, PdfStatus, PdfStep, Quad, RECENTLY_ADDED_DAYS,
-    Scope, Settings, SortColumn, SourceRecord, Tag, WindowState,
+    Scope, Settings, SortColumn, SourceRecord, Tag, Topic, WindowState,
 };
 use paper_core::{Library, SettingsStore};
 pub use paper_fetch::HttpClient;
@@ -32,6 +33,8 @@ use paper_fetch::{Contact, FetchError, PdfQuery, Resolver, UreqClient};
 pub use paper_ids::Identifier;
 
 use crate::pool::{PoolError, ThreadPool};
+pub use crate::topics::TopicTags;
+use crate::topics::{JEV_SOURCE, TopicJob};
 
 /// Threads for lookups and downloads.
 const POOL_SIZE: usize = 4;
@@ -68,6 +71,10 @@ pub trait EngineObserver: Send + Sync {
     /// file arrived. Download steps come at most every `PDF_STEP_INTERVAL`,
     /// plus the last one.
     fn pdf_step(&self, item_id: String, step: PdfStep);
+    /// A paper that was just added got these tags from the topic list.
+    /// `tags_changed` comes first. `tag_with_topics` returns its tags
+    /// instead of sending this.
+    fn topics_added(&self, item_id: String, tags: Vec<String>);
 }
 
 /// How an engine is built. Tests swap the settings directory and the HTTP
@@ -297,6 +304,7 @@ impl Engine {
                         Err(error) => tracing::info!(%error, "no PDF search after the lookup"),
                     }
                 }
+                self.start_topic_tags(&row.id);
                 Ok(row)
             }
             Ok(outcome) => outcome,
@@ -335,11 +343,20 @@ impl Engine {
                 .filter(|key| !key.is_empty()),
         };
         let path = PathBuf::from(path);
-        match self.run(move || job.run(&path)).await {
+        let outcome = match self.run(move || job.run(&path)).await {
             Ok(outcome) => outcome,
             Err(PoolError::Closed) => Err(PaperError::Closed),
             Err(PoolError::Panicked(message)) => Err(PaperError::Io { message }),
+        };
+        if let Ok(imported) = &outcome
+            && !matches!(
+                imported.identification,
+                Identification::NotFound | Identification::Failed { .. }
+            )
+        {
+            self.start_topic_tags(&imported.item.id);
         }
+        outcome
     }
 
     /// Adds a paper the user typed in, such as a manuscript that has no DOI
@@ -726,6 +743,108 @@ impl Engine {
         self.library.set_tag_color(tag_id, color)?;
         self.notify(|observer| observer.tags_changed());
         Ok(())
+    }
+
+    // ----- topics -----
+
+    /// The library's topic list, which automatic tags come from.
+    pub fn topics(&self) -> Result<Vec<Topic>> {
+        self.ensure_open()?;
+        self.library.topics()
+    }
+
+    /// Replaces the topic list. Tags already given stay on their papers.
+    pub fn set_topics(&self, topics: &[Topic]) -> Result<()> {
+        self.ensure_open()?;
+        self.library.set_topics(topics)
+    }
+
+    /// Asks Jev again which topics each paper is about and adds the ones it
+    /// lacks as tags, even to papers tagged before. Returns the papers that
+    /// got tags. Fails with `Settings` when no Jev API key is set or TypeSafe
+    /// refuses it, and with the first error when no paper could be asked.
+    pub async fn tag_with_topics(&self, item_ids: &[String]) -> Result<Vec<TopicTags>> {
+        self.ensure_open()?;
+        let Some(job) = self.topic_job() else {
+            return Err(PaperError::Settings {
+                message: "Add a Jev API key in Settings to tag papers with topics.".to_string(),
+            });
+        };
+        // Queued together, so the pool's threads ask about several papers at once.
+        let runs: Vec<_> = item_ids
+            .iter()
+            .map(|id| {
+                let job = job.clone();
+                let id = id.clone();
+                self.run(move || job.run(&id).map(|tags| TopicTags { item_id: id, tags }))
+            })
+            .collect();
+        let mut tagged = Vec::new();
+        let mut asked = 0;
+        let mut first_error = None;
+        for run in runs {
+            match run.await {
+                Ok(Ok(result)) => {
+                    asked += 1;
+                    if !result.tags.is_empty() {
+                        tagged.push(result);
+                    }
+                }
+                Ok(Err(error @ PaperError::Settings { .. })) => return Err(error),
+                Ok(Err(error)) => {
+                    tracing::warn!(%error, "could not tag a paper with topics");
+                    first_error.get_or_insert(error);
+                }
+                Err(PoolError::Closed) => return Err(PaperError::Closed),
+                Err(PoolError::Panicked(message)) => {
+                    first_error.get_or_insert(PaperError::Network { message });
+                }
+            }
+        }
+        match first_error {
+            Some(error) if asked == 0 => Err(error),
+            _ => Ok(tagged),
+        }
+    }
+
+    /// Tags a paper that was just added, once: a paper Jev was asked about
+    /// before keeps the tags the user left it. Runs on its own and reports
+    /// through `topics_added`.
+    fn start_topic_tags(&self, item_id: &str) {
+        let Some(job) = self.topic_job() else { return };
+        match self.library.has_source_record(item_id, JEV_SOURCE) {
+            Ok(false) => {}
+            Ok(true) => return,
+            Err(error) => {
+                tracing::warn!(%error, "could not check for earlier topics");
+                return;
+            }
+        }
+        let item_id = item_id.to_string();
+        drop(self.run(move || match job.run(&item_id) {
+            Ok(tags) if !tags.is_empty() => {
+                notify(&job.observer, |o| o.topics_added(item_id.clone(), tags));
+            }
+            Ok(_) => {}
+            Err(error) => tracing::warn!(%error, %item_id, "could not tag the paper with topics"),
+        }));
+    }
+
+    /// The tagging job, or `None` without a Jev API key.
+    fn topic_job(&self) -> Option<TopicJob> {
+        let settings = self.settings.settings();
+        let jev_api_key = settings.jev_api_key.trim().to_string();
+        if jev_api_key.is_empty() {
+            return None;
+        }
+        Some(TopicJob {
+            library: Arc::clone(&self.library),
+            observer: Arc::clone(&self.observer),
+            resolver: Arc::clone(&self.resolver),
+            contact: Contact::new(settings.contact_email),
+            openalex_api_key: Some(settings.openalex_api_key).filter(|key| !key.is_empty()),
+            jev_api_key,
+        })
     }
 
     // ----- notes -----

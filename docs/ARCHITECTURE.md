@@ -63,12 +63,13 @@ Dependency direction is strictly `paper-ffi` → `paper-engine` → (`paper-core
 | Library | `open_library(path)`, `create_library(path)`, `recent_libraries()`, `close()` | `Engine` is created by `open_library`. |
 | Items | `list_items(ItemQuery) -> Vec<ItemRow>`, `item_detail(id) -> ItemDetail`, `add_by_identifier(text)`, `retry_lookup(id)`, `import_pdf(path)`, `update_metadata(id, MetadataPatch)`, `delete_items(ids)`, `undo_delete()` | `ItemQuery` is text, scope, sort column, and direction; the text runs through FTS5. `scope` is a collection, a tag, or one of the smart lists. `add_by_identifier` inserts a `Pending` placeholder row at once, then fills it in from the lookup; a failed lookup leaves the row `Failed` for `retry_lookup`. `import_pdf` does the same for a PDF file and returns `ImportedPdf` with how the paper was identified (see below); a file nothing identifies stays as an item with its PDF and a `Failed` row, and a paper already in the library gets the PDF and returns `Duplicate`. |
 | Collections and tags | `collection_tree() -> Vec<CollectionNode>`, `create_collection`, `rename_collection`, `move_collection`, `add_to_collection`, `tags()`, `set_tags(id, names)`, `set_tag_color(id, color)`, `set_favorite(ids, favorite)` | A tag's color is `#RRGGBB`; the app picks it from its palette when the tag is new. |
+| Topics | `topics() -> Vec<Topic>`, `set_topics(topics)`, `tag_with_topics(ids) -> Vec<TopicTags>` | The library's topic list (name and description), which automatic tags come from. With a Jev API key set, a finished lookup or an identified import asks Jev once per paper which topics it is about and adds up to three as ordinary tags (see Topic tags below). `tag_with_topics` asks again for the papers the user picks and returns the tags each one gained. |
 | Attachments | `attachment_file(id) -> AttachmentFile` (absolute path, last page, last zoom), `set_reading_position(id, page, zoom)`, `attach_file(item_id, path)`, `find_pdf(item_id)`, `first_figure(id) -> Option<Figure>` | `first_figure` says where a PDF's first figure is, for the paper's preview picture: the drawings and images above the "Figure 1" caption in the first four pages, or else the largest embedded image. The app draws that region with PDFKit and caches it under `cache/previews/`. A finished `add_by_identifier` starts `find_pdf` on its own, and the app follows it through `pdf_progress` and `pdf_step`. `find_pdf` returns the PDF the item already has without touching the network, fails with `PdfNotFound` when no source offers one, and allows one search per item at a time. Zoom 0 means fit width. |
 | Annotations | `annotations(attachment_id) -> Vec<Annotation>`, `create_annotation(New)`, `update_annotation(id, Patch)`, `delete_annotation(id)`, `import_embedded(attachment_id, Vec<New>)` | Geometry is in PDF user space, see below. |
 | Notes | `note(item_id)`, `save_note(item_id, markdown)` | Autosave calls `save_note` with a debounce in the app. |
 | Citations | `bibtex(ids) -> String`, `citation(ids, CitationStyle) -> Citation`, `export_bib(ids, path) -> u32` | Entries come sorted by citation key, and an id listed twice is cited once. `citation` returns the style's reference list as plain text and as HTML with the style's italics, for a rich paste; `CitationStyle` is `Apa` for now. `export_bib` writes the `.bib` file on an engine thread and returns the entry count. See Citation keys below. |
-| Settings | `settings()`, `update_settings(Patch)`, `pinned_tabs()`, `set_pinned_tabs(item_ids)` | Pinned tabs are kept per library path, in tab order. Contact email, OpenAlex key, Anthropic key, window state, panel sizes. |
-| Events | `set_observer(Arc<dyn EngineObserver>)` with `items_changed(ids)`, `collections_changed()`, `tags_changed()`, `lookup_progress(item_id, LookupStatus)`, `pdf_progress(item_id, PdfStatus)`, `pdf_step(item_id, PdfStep)` (the source being asked, or bytes downloaded of the total, at most every 50 ms) | A foreign trait the app implements. An event caused by a synchronous call arrives on the caller's thread before that call returns; everything a lookup does after it leaves for the network (database writes and events) runs on an engine thread, so the app hops to the main thread asynchronously, never with a blocking dispatch. Errors are not events: every `async fn` returns its own `PaperError`, and lookup errors carry the id of the row they left behind. |
+| Settings | `settings()`, `update_settings(Patch)`, `pinned_tabs()`, `set_pinned_tabs(item_ids)` | Pinned tabs are kept per library path, in tab order. Contact email, OpenAlex key, Anthropic key, Jev API key, window state, panel sizes. |
+| Events | `set_observer(Arc<dyn EngineObserver>)` with `items_changed(ids)`, `collections_changed()`, `tags_changed()`, `lookup_progress(item_id, LookupStatus)`, `pdf_progress(item_id, PdfStatus)`, `pdf_step(item_id, PdfStep)` (the source being asked, or bytes downloaded of the total, at most every 50 ms), `topics_added(item_id, tags)` (tags Jev gave a paper that was just added) | A foreign trait the app implements. An event caused by a synchronous call arrives on the caller's thread before that call returns; everything a lookup does after it leaves for the network (database writes and events) runs on an engine thread, so the app hops to the main thread asynchronously, never with a blocking dispatch. Errors are not events: every `async fn` returns its own `PaperError`, and lookup errors carry the id of the row they left behind. |
 
 Rules for the API. Reads that the UI needs on every keystroke or scroll, such as `list_items`, are synchronous and return in a few milliseconds from the database. Anything that touches the network or takes more than a few milliseconds is an `async fn` that completes a UniFFI future on the engine's thread pool. Records are plain data (`ItemRow`, `ItemDetail`, `CollectionNode`, `Annotation`, `AttachmentFile`), enums are closed sets (`ItemKind`, `AnnotationKind`, `LookupStatus`, `SortColumn`), errors are one `PaperError` enum with a variant per subsystem, and no method returns a handle that the caller must keep alive except `Engine` itself. The app subscribes once with `set_observer`, so nothing in the engine ever calls back into the UI toolkit.
 
@@ -88,6 +89,14 @@ A key is given once, when the paper's metadata is in: at the end of a lookup or 
 
 Without a key the file never leaves the machine; Crossref only sees the identifiers and title taken from it. The search and model responses are kept in `source_records` (`crossref_search`, `anthropic`) next to the lookup's own records.
 
+## Topic tags
+
+A paper gets up to three tags from the library's topic list without the user typing them, so the TAGS group can filter by subject. The research behind the design is in `docs/research/topic-tags.md`.
+
+When a lookup finishes or an import identifies its paper, and the user has set a Jev API key, a job on the engine's pool does three things. First, it reads the paper's OpenAlex work by DOI for its keywords and abstract. Second, it sends the title, venue, abstract (Crossref's, else OpenAlex's), and keywords to TypeSafe's Jev model with one yes or no question per topic, built from the topic's name and description, in a single request. Third, it adds the topics Jev answers yes to with a probability of at least 0.8, at most three and the most likely first, as ordinary tags, and sends `tags_changed` and then `topics_added` so the app can show a toast. Both responses are kept in `source_records` (`openalex`, `typesafe`).
+
+A paper is tagged automatically once. The `typesafe` record marks it, so a later `retry_lookup` does not bring back a tag the user removed. `tag_with_topics` asks again on request and only adds tags. Without a key nothing leaves the machine for TypeSafe and no tags are added. A key TypeSafe refuses is a `Settings` error.
+
 ## Data on disk
 
 The library directory is chosen on first launch. The chooser offers to create a new folder (suggesting `~/Documents/Paper`) or to open an existing one. A folder is recognized as a library when it contains `library.db`. The app keeps a list of recent libraries in its settings and opens the last used one on start.
@@ -101,7 +110,7 @@ The library directory is chosen on first launch. The chooser offers to create a 
 └── cache/              page thumbnails, figure previews, extracted text; safe to delete
 ```
 
-Settings (recent libraries, window state, each library's pinned reader tabs, theme, contact email for API user agents, OpenAlex and Anthropic keys) are stored separately in the platform config directory (`~/Library/Application Support/com.betty2310.paper` on macOS, `%APPDATA%\betty2310\paper\config` on Windows, `~/.config/paper` on Linux) as `settings.json`, so a library directory can be shared between machines without sharing machine settings. The sandboxed macOS app also stores a security scoped bookmark for each recent library next to the settings, because the sandbox forgets folder access between launches otherwise.
+Settings (recent libraries, window state, each library's pinned reader tabs, theme, contact email for API user agents, OpenAlex, Anthropic, and Jev keys) are stored separately in the platform config directory (`~/Library/Application Support/com.betty2310.paper` on macOS, `%APPDATA%\betty2310\paper\config` on Windows, `~/.config/paper` on Linux) as `settings.json`, so a library directory can be shared between machines without sharing machine settings. The sandboxed macOS app also stores a security scoped bookmark for each recent library next to the settings, because the sandbox forgets folder access between launches otherwise.
 
 ## Database schema
 
@@ -171,6 +180,14 @@ CREATE TABLE collection_items (
 
 CREATE TABLE tags (id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL, color TEXT);
 CREATE TABLE item_tags (item_id TEXT NOT NULL, tag_id TEXT NOT NULL, PRIMARY KEY (item_id, tag_id));
+
+CREATE TABLE topics (              -- what automatic tags can be named (migration 4)
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  description TEXT NOT NULL,       -- read by Jev; says what the topic covers and what it does not
+  position INTEGER NOT NULL,
+  created_at TEXT NOT NULL, modified_at TEXT NOT NULL
+);
 
 CREATE TABLE notes (
   id TEXT PRIMARY KEY,

@@ -277,6 +277,7 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
         menu.addItem(withTitle: "Export BibTeX…", action: #selector(MainWindowController.exportBibtex(_:)), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Add to Favorites", action: #selector(MainWindowController.toggleFavorite(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "Tag with Topics", action: #selector(MainWindowController.tagWithTopics(_:)), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Copy DOI", action: #selector(copyDOI(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Open Publisher Page", action: #selector(openPublisherPage(_:)), keyEquivalent: "")

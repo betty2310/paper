@@ -15,7 +15,7 @@ use paper_engine::{
     CitationStyle, CollectionNode, Creator, CreatorRole, Figure, FigureSource, Identification,
     ImportedPdf, ItemDetail, ItemFields, ItemKind, ItemQuery, ItemRow, LookupStatus, MetadataPatch,
     NewAnnotation, PagePoint, PageRect, PaperError, PdfStatus, PdfStep, Quad, Scope, Settings,
-    SortColumn, Tag, WindowState,
+    SortColumn, Tag, Topic, TopicTags, WindowState,
 };
 
 uniffi::setup_scaffolding!();
@@ -258,6 +258,18 @@ pub struct Tag {
 }
 
 #[uniffi::remote(Record)]
+pub struct Topic {
+    pub name: String,
+    pub description: String,
+}
+
+#[uniffi::remote(Record)]
+pub struct TopicTags {
+    pub item_id: String,
+    pub tags: Vec<String>,
+}
+
+#[uniffi::remote(Record)]
 pub struct ItemDetail {
     pub id: String,
     pub fields: ItemFields,
@@ -372,6 +384,7 @@ pub struct Settings {
     pub contact_email: String,
     pub openalex_api_key: String,
     pub anthropic_api_key: String,
+    pub jev_api_key: String,
     pub window: Option<WindowState>,
     pub sidebar_width: Option<f64>,
     pub detail_width: Option<f64>,
@@ -390,6 +403,7 @@ pub trait EngineObserver: Send + Sync {
     fn lookup_progress(&self, item_id: String, status: LookupStatus);
     fn pdf_progress(&self, item_id: String, status: PdfStatus);
     fn pdf_step(&self, item_id: String, step: PdfStep);
+    fn topics_added(&self, item_id: String, tags: Vec<String>);
 }
 
 /// Passes engine events to the Swift observer.
@@ -418,6 +432,10 @@ impl engine::EngineObserver for ObserverAdapter {
 
     fn pdf_step(&self, item_id: String, step: PdfStep) {
         self.0.pdf_step(item_id, step);
+    }
+
+    fn topics_added(&self, item_id: String, tags: Vec<String>) {
+        self.0.topics_added(item_id, tags);
     }
 }
 
@@ -629,6 +647,23 @@ impl Engine {
 
     pub fn set_tag_color(&self, tag_id: String, color: Option<String>) -> Result<(), PaperError> {
         self.0.set_tag_color(&tag_id, color.as_deref())
+    }
+
+    // topics
+
+    pub fn topics(&self) -> Result<Vec<Topic>, PaperError> {
+        self.0.topics()
+    }
+
+    pub fn set_topics(&self, topics: Vec<Topic>) -> Result<(), PaperError> {
+        self.0.set_topics(&topics)
+    }
+
+    pub async fn tag_with_topics(
+        &self,
+        item_ids: Vec<String>,
+    ) -> Result<Vec<TopicTags>, PaperError> {
+        self.0.tag_with_topics(&item_ids).await
     }
 
     // notes

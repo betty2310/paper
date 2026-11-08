@@ -26,6 +26,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/001_initial.sql"),
     include_str!("migrations/002_citation_keys.sql"),
     include_str!("migrations/003_favorites.sql"),
+    include_str!("migrations/004_topics.sql"),
 ];
 
 /// Separator for names packed into one SQL string column.
@@ -614,6 +615,14 @@ impl Library {
         Ok(())
     }
 
+    /// Whether the item has a raw response from `source`.
+    pub fn has_source_record(&self, item_id: &str, source: &str) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn
+            .prepare_cached("SELECT 1 FROM source_records WHERE item_id = ?1 AND source = ?2")?
+            .exists(params![item_id, source])?)
+    }
+
     pub fn source_records(&self, item_id: &str) -> Result<Vec<SourceRecord>> {
         let conn = self.conn.lock().unwrap();
         let records = conn
@@ -904,6 +913,123 @@ impl Library {
             params![tag_id, color],
         )?;
         not_found_if_zero(changed, tag_id)
+    }
+
+    /// Adds tags to an item and keeps the ones it has, creating tags that do
+    /// not exist yet. Names are matched ignoring case. Returns the names of
+    /// the tags the item did not have before, as the tags spell them.
+    pub fn add_tags(&self, item_id: &str, names: &[String]) -> Result<Vec<String>> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        require_live_item(&tx, item_id)?;
+        let mut added = Vec::new();
+        for name in names {
+            let name = name.trim();
+            if name.is_empty() {
+                continue;
+            }
+            let existing: Option<(String, String)> = tx
+                .query_row(
+                    "SELECT id, name FROM tags WHERE name = ?1",
+                    params![name],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            let (tag_id, tag_name) = match existing {
+                Some(tag) => tag,
+                None => {
+                    let id = new_id();
+                    tx.execute(
+                        "INSERT INTO tags (id, name) VALUES (?1, ?2)",
+                        params![id, name],
+                    )?;
+                    (id, name.to_string())
+                }
+            };
+            let inserted = tx.execute(
+                "INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?1, ?2)",
+                params![item_id, tag_id],
+            )?;
+            if inserted > 0 {
+                added.push(tag_name);
+            }
+        }
+        if !added.is_empty() {
+            tx.execute(
+                "UPDATE items SET modified_at = ?2 WHERE id = ?1",
+                params![item_id, time::now()],
+            )?;
+            reindex(&tx, item_id)?;
+        }
+        tx.commit()?;
+        Ok(added)
+    }
+
+    // ----- topics -----
+
+    /// The library's topic list, in the user's order.
+    pub fn topics(&self) -> Result<Vec<Topic>> {
+        let conn = self.conn.lock().unwrap();
+        let topics = conn
+            .prepare_cached("SELECT name, description FROM topics ORDER BY position")?
+            .query_map([], |row| {
+                Ok(Topic {
+                    name: row.get(0)?,
+                    description: row.get(1)?,
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(topics)
+    }
+
+    /// Replaces the topic list. Names are trimmed and must be unique
+    /// ignoring case; a topic keeps its id while its name stays. Tags made
+    /// from a removed topic stay on their papers.
+    pub fn set_topics(&self, topics: &[Topic]) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let now = time::now();
+        let mut kept: Vec<String> = Vec::new();
+        for (position, topic) in topics.iter().enumerate() {
+            let name = non_empty_name(&topic.name)?;
+            if kept.iter().any(|known| known.eq_ignore_ascii_case(name)) {
+                return Err(PaperError::Library {
+                    message: format!("The topic “{name}” is in the list twice."),
+                });
+            }
+            let description = topic.description.trim();
+            let id: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM topics WHERE name = ?1",
+                    params![name],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            match id {
+                Some(id) => {
+                    tx.execute(
+                        "UPDATE topics SET name = ?2, description = ?3, position = ?4, modified_at = ?5
+                         WHERE id = ?1 AND (name != ?2 COLLATE BINARY OR description != ?3 OR position != ?4)",
+                        params![id, name, description, position as i64, now],
+                    )?;
+                }
+                None => {
+                    tx.execute(
+                        "INSERT INTO topics (id, name, description, position, created_at, modified_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+                        params![new_id(), name, description, position as i64, now],
+                    )?;
+                }
+            }
+            kept.push(name.to_string());
+        }
+        let placeholders = vec!["?"; kept.len()].join(", ");
+        tx.execute(
+            &format!("DELETE FROM topics WHERE name NOT IN ({placeholders})"),
+            params_from_iter(&kept),
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 
     // ----- notes -----

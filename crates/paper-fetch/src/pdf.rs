@@ -23,6 +23,18 @@ const MAX_URLS_PER_SOURCE: usize = 6;
 /// byte order mark or blank lines first.
 const SIGNATURE_WINDOW: usize = 1024;
 
+/// The OpenAlex work of a DOI, with the user's API key if they have one.
+pub fn openalex_work_url(doi: &str, api_key: Option<&str>) -> String {
+    let mut url = format!(
+        "https://api.openalex.org/works/https://doi.org/{}",
+        percent_encode_path(doi)
+    );
+    if let Some(key) = api_key.filter(|key| !key.is_empty()) {
+        url.push_str(&format!("?api_key={key}"));
+    }
+    url
+}
+
 /// What to look for: the item's DOI, its arXiv ID, or both.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PdfQuery {
@@ -110,17 +122,7 @@ impl Search<'_> {
         };
 
         let mut pmcid = None;
-        let mut url = format!(
-            "https://api.openalex.org/works/https://doi.org/{}",
-            percent_encode_path(doi)
-        );
-        if let Some(key) = query
-            .openalex_api_key
-            .as_deref()
-            .filter(|key| !key.is_empty())
-        {
-            url.push_str(&format!("?api_key={key}"));
-        }
+        let url = openalex_work_url(doi, query.openalex_api_key.as_deref());
         self.checking(OPENALEX);
         if let Some(work) = self.json(OPENALEX, &url) {
             pmcid = openalex_pmcid(&work);

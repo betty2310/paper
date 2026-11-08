@@ -11,6 +11,9 @@
 //!
 //! `Resolver::search_title` and `Resolver::read_first_page` are the network
 //! steps of identifying a PDF that does not print its DOI.
+//!
+//! `Resolver::openalex_work` and `Resolver::choose_topics` pick a paper's
+//! automatic tags from the library's topic list.
 
 mod crossref;
 mod csl;
@@ -22,13 +25,18 @@ mod resolver;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 mod text;
+mod topics;
 
 pub use http::{Contact, HttpClient, Response, USER_AGENT_PRODUCT, UreqClient};
 pub use identify::{
     CROSSREF_SEARCH, MESSAGES_URL, MODEL, MODEL_SOURCE, PageReading, TitleMatch, TitleSearch,
 };
-pub use pdf::{FoundPdf, PdfQuery, PdfSearch, is_pdf};
+pub use pdf::{FoundPdf, PdfQuery, PdfSearch, is_pdf, openalex_work_url};
 pub use resolver::{Lookup, Resolver};
+pub use topics::{
+    JEV_MODEL, JEV_SOURCE, MAX_TOPICS, MIN_PROBABILITY, OpenAlexWork, PaperText, SYSTEM_ONE_URL,
+    TopicChoice,
+};
 
 /// The Crossref search URL `Resolver::search_title` asks, for scripting
 /// answers in tests.

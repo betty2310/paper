@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use paper_engine::{
     CitationStyle, Creator, Engine, EngineObserver, EngineOptions, Identification, ItemFields,
-    ItemKind, ItemQuery, LookupStatus, MetadataPatch, PaperError, PdfStatus, PdfStep, Scope,
+    ItemKind, ItemQuery, LookupStatus, MetadataPatch, PaperError, PdfStatus, PdfStep, Scope, Topic,
+    TopicTags,
 };
 use paper_fetch::testing::FakeHttp;
 use pollster::block_on;
@@ -32,6 +33,7 @@ enum Event {
     Lookup(String, LookupStatus),
     Pdf(String, PdfStatus),
     Step(String, PdfStep),
+    TopicsAdded(String, Vec<String>),
 }
 
 /// Records every event with the thread it arrived on.
@@ -73,6 +75,9 @@ impl EngineObserver for Recorder {
     }
     fn pdf_step(&self, item_id: String, step: PdfStep) {
         self.push(Event::Step(item_id, step));
+    }
+    fn topics_added(&self, item_id: String, tags: Vec<String>) {
+        self.push(Event::TopicsAdded(item_id, tags));
     }
 }
 
@@ -1461,4 +1466,195 @@ fn citation_keys_are_given_once_kept_and_used_by_every_export() {
         apa.text,
         "LeCun, Y., Bengio, Y., & Hinton, G. (2015). Learning deep networks. Nature, 521(7553), 436–444. https://doi.org/10.1038/nature14539"
     );
+}
+
+fn tag_names(engine: &Engine, item_id: &str) -> Vec<String> {
+    let detail = engine.item_detail(item_id).unwrap();
+    detail.tags.into_iter().map(|tag| tag.name).collect()
+}
+
+fn jev_requests(http: &FakeHttp) -> Vec<serde_json::Value> {
+    http.requests()
+        .into_iter()
+        .filter(|request| request.url == paper_fetch::SYSTEM_ONE_URL)
+        .map(|request| serde_json::from_slice(&request.body).unwrap())
+        .collect()
+}
+
+#[test]
+fn every_library_starts_with_the_measured_topic_list() {
+    let h = harness();
+    let topics = h.engine.topics().unwrap();
+    assert_eq!(topics.len(), 27);
+    assert_eq!(topics[0].name, "Software engineering");
+    assert!(
+        topics
+            .iter()
+            .any(|topic| topic.name == "GNSS spoofing" && topic.description.contains("Not face"))
+    );
+
+    let mine = |name: &str| Topic {
+        name: name.into(),
+        description: format!("Papers about {name}."),
+    };
+    h.engine
+        .set_topics(&[mine(" GNSS "), mine("Agent harness")])
+        .unwrap();
+    let names: Vec<String> = h
+        .engine
+        .topics()
+        .unwrap()
+        .into_iter()
+        .map(|t| t.name)
+        .collect();
+    assert_eq!(
+        names,
+        ["GNSS", "Agent harness"],
+        "trimmed, in the given order"
+    );
+    assert!(matches!(
+        h.engine.set_topics(&[mine("UAVs"), mine("uavs")]),
+        Err(PaperError::Library { .. })
+    ));
+    assert_eq!(
+        h.engine.topics().unwrap().len(),
+        2,
+        "a refused list changes nothing"
+    );
+}
+
+#[test]
+fn jev_tags_a_new_paper_once_and_again_only_when_asked() {
+    let h = harness();
+    let mut settings = h.engine.settings();
+    settings.jev_api_key = " ts-key ".into();
+    h.engine.update_settings(settings).unwrap();
+    let topic = |name: &str| Topic {
+        name: name.into(),
+        description: String::new(),
+    };
+    h.engine
+        .set_topics(&[
+            topic("Computer vision"),
+            topic("GNSS spoofing"),
+            topic("Deep learning"),
+        ])
+        .unwrap();
+    h.http.route(
+        &paper_fetch::openalex_work_url("10.1038/nature14539", None),
+        200,
+        serde_json::json!({
+            "keywords": [{"display_name": "convolutional neural networks"}],
+            "abstract_inverted_index": {"Deep": [0], "learning": [1]},
+        })
+        .to_string()
+        .into_bytes(),
+    );
+    let answers = |vision: f64| {
+        serde_json::json!({"answers": {
+            "t0": {"type": "noul", "noul": vision},
+            "t1": {"type": "noul", "noul": 0.01},
+            "t2": {"type": "noul", "noul": 0.97},
+        }})
+        .to_string()
+        .into_bytes()
+    };
+    h.http
+        .route(paper_fetch::SYSTEM_ONE_URL, 200, answers(0.85));
+
+    let row = block_on(h.engine.add_by_identifier("10.1038/nature14539")).unwrap();
+    let added = Event::TopicsAdded(
+        row.id.clone(),
+        vec!["Deep learning".into(), "Computer vision".into()],
+    );
+    let events = wait_for(&h.events, &added);
+    let tags_at = events.iter().position(|e| *e == Event::Tags);
+    assert!(
+        tags_at.is_some_and(|at| at < events.iter().position(|e| *e == added).unwrap()),
+        "the tag list is fresh when the app hears which tags were added: {events:?}"
+    );
+    assert_eq!(
+        tag_names(&h.engine, &row.id),
+        ["Computer vision", "Deep learning"]
+    );
+    let sent = jev_requests(&h.http);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["state"]["title"], "Deep learning");
+    assert_eq!(sent[0]["state"]["venue"], "Nature");
+    assert_eq!(
+        sent[0]["state"]["keywords"],
+        serde_json::json!(["convolutional neural networks"])
+    );
+    assert_eq!(
+        sent[0]["state"]["abstract"], "Deep learning",
+        "Crossref has no abstract for this paper, so OpenAlex's is read"
+    );
+    assert_eq!(
+        h.http
+            .requests()
+            .iter()
+            .find(|r| r.url == paper_fetch::SYSTEM_ONE_URL)
+            .unwrap()
+            .headers["Authorization"],
+        "Bearer ts-key"
+    );
+
+    // The user takes one tag off; looking the paper up again does not bring it back.
+    h.engine
+        .set_tags(&row.id, &["Deep learning".into()])
+        .unwrap();
+    block_on(h.engine.retry_lookup(&row.id)).unwrap();
+    assert_eq!(
+        jev_requests(&h.http).len(),
+        1,
+        "a paper is tagged automatically once"
+    );
+    assert_eq!(tag_names(&h.engine, &row.id), ["Deep learning"]);
+
+    // Asking explicitly runs Jev again and adds only what the paper lacks.
+    h.events.take();
+    let tagged = block_on(h.engine.tag_with_topics(std::slice::from_ref(&row.id))).unwrap();
+    assert_eq!(
+        tagged,
+        [TopicTags {
+            item_id: row.id.clone(),
+            tags: vec!["Computer vision".into()]
+        }]
+    );
+    assert!(
+        !h.events
+            .take()
+            .iter()
+            .any(|e| matches!(e, Event::TopicsAdded(..)))
+    );
+    h.http
+        .route(paper_fetch::SYSTEM_ONE_URL, 200, answers(0.79));
+    assert_eq!(
+        block_on(h.engine.tag_with_topics(std::slice::from_ref(&row.id))).unwrap(),
+        [],
+        "nothing new above the threshold"
+    );
+
+    h.http
+        .route(paper_fetch::SYSTEM_ONE_URL, 401, b"{}".to_vec());
+    let refused = block_on(h.engine.tag_with_topics(std::slice::from_ref(&row.id))).unwrap_err();
+    assert!(
+        matches!(&refused, PaperError::Settings { message } if message.contains("Jev API key"))
+    );
+
+    let mut settings = h.engine.settings();
+    settings.jev_api_key = String::new();
+    h.engine.update_settings(settings).unwrap();
+    assert!(matches!(
+        block_on(h.engine.tag_with_topics(std::slice::from_ref(&row.id))),
+        Err(PaperError::Settings { .. })
+    ));
+}
+
+#[test]
+fn without_a_jev_key_nothing_is_sent_to_typesafe() {
+    let h = harness();
+    block_on(h.engine.add_by_identifier("10.1038/nature14539")).unwrap();
+    assert!(jev_requests(&h.http).is_empty());
+    assert!(h.engine.tags().unwrap().is_empty());
 }

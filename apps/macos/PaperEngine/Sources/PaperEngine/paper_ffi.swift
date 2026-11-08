@@ -740,9 +740,15 @@ public protocol EngineProtocol: AnyObject, Sendable {
     
     func setTags(itemId: String, names: [String]) throws 
     
+    func setTopics(topics: [Topic]) throws 
+    
     func settings()  -> Settings
     
+    func tagWithTopics(itemIds: [String]) async throws  -> [TopicTags]
+    
     func tags() throws  -> [Tag]
+    
+    func topics() throws  -> [Topic]
     
     func undoDelete() throws  -> [String]
     
@@ -1233,6 +1239,15 @@ open func setTags(itemId: String, names: [String])throws   {try rustCallWithErro
 }
 }
     
+open func setTopics(topics: [Topic])throws   {try rustCallWithError(FfiConverterTypePaperError_lift) {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engine_set_topics(
+            self.uniffiCloneHandle(),
+        FfiConverterSequenceTypeTopic.lower(topics),uniffiCallStatus
+    )
+}
+}
+    
 open func settings() -> Settings  {
     return try!  FfiConverterTypeSettings_lift(try! rustCall() {
         uniffiCallStatus in
@@ -1242,10 +1257,35 @@ open func settings() -> Settings  {
 })
 }
     
+open func tagWithTopics(itemIds: [String])async throws  -> [TopicTags]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_paper_ffi_fn_method_engine_tag_with_topics(
+                        self.uniffiCloneHandle(),FfiConverterSequenceString.lower(itemIds)
+                )
+            },
+            pollFunc: ffi_paper_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_paper_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_paper_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeTopicTags.lift,
+            errorHandler: FfiConverterTypePaperError_lift
+        )
+}
+    
 open func tags()throws  -> [Tag]  {
     return try  FfiConverterSequenceTypeTag.lift(try rustCallWithError(FfiConverterTypePaperError_lift) {
         uniffiCallStatus in
     uniffi_paper_ffi_fn_method_engine_tags(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+open func topics()throws  -> [Topic]  {
+    return try  FfiConverterSequenceTypeTopic.lift(try rustCallWithError(FfiConverterTypePaperError_lift) {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engine_topics(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -1357,6 +1397,8 @@ public protocol EngineObserver: AnyObject, Sendable {
     
     func pdfStep(itemId: String, step: PdfStep) 
     
+    func topicsAdded(itemId: String, tags: [String]) 
+    
 }
 /**
  * Implemented in Swift. Called on engine threads.
@@ -1465,6 +1507,16 @@ open func pdfStep(itemId: String, step: PdfStep)  {try! rustCall() {
             self.uniffiCloneHandle(),
         FfiConverterString.lower(itemId),
         FfiConverterTypePdfStep_lower(step),uniffiCallStatus
+    )
+}
+}
+    
+open func topicsAdded(itemId: String, tags: [String])  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engineobserver_topics_added(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(itemId),
+        FfiConverterSequenceString.lower(tags),uniffiCallStatus
     )
 }
 }
@@ -1632,6 +1684,32 @@ fileprivate struct UniffiCallbackInterfaceEngineObserver {
                 return uniffiObj.pdfStep(
                      itemId: try FfiConverterString.lift(itemId),
                      step: try FfiConverterTypePdfStep_lift(step)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        topicsAdded: { (
+            uniffiHandle: UInt64,
+            itemId: RustBuffer,
+            tags: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterTypeEngineObserver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.topicsAdded(
+                     itemId: try FfiConverterString.lift(itemId),
+                     tags: try FfiConverterSequenceString.lift(tags)
                 )
             }
 
@@ -3048,6 +3126,7 @@ public struct Settings: Equatable, Hashable {
     public var contactEmail: String
     public var openalexApiKey: String
     public var anthropicApiKey: String
+    public var jevApiKey: String
     public var window: WindowState?
     public var sidebarWidth: Double?
     public var detailWidth: Double?
@@ -3056,10 +3135,11 @@ public struct Settings: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(contactEmail: String, openalexApiKey: String, anthropicApiKey: String, window: WindowState?, sidebarWidth: Double?, detailWidth: Double?, sidebarCollapsed: Bool, detailCollapsed: Bool) {
+    public init(contactEmail: String, openalexApiKey: String, anthropicApiKey: String, jevApiKey: String, window: WindowState?, sidebarWidth: Double?, detailWidth: Double?, sidebarCollapsed: Bool, detailCollapsed: Bool) {
         self.contactEmail = contactEmail
         self.openalexApiKey = openalexApiKey
         self.anthropicApiKey = anthropicApiKey
+        self.jevApiKey = jevApiKey
         self.window = window
         self.sidebarWidth = sidebarWidth
         self.detailWidth = detailWidth
@@ -3086,6 +3166,7 @@ public struct FfiConverterTypeSettings: FfiConverterRustBuffer {
                 contactEmail: FfiConverterString.read(from: &buf), 
                 openalexApiKey: FfiConverterString.read(from: &buf), 
                 anthropicApiKey: FfiConverterString.read(from: &buf), 
+                jevApiKey: FfiConverterString.read(from: &buf), 
                 window: FfiConverterOptionTypeWindowState.read(from: &buf), 
                 sidebarWidth: FfiConverterOptionDouble.read(from: &buf), 
                 detailWidth: FfiConverterOptionDouble.read(from: &buf), 
@@ -3098,6 +3179,7 @@ public struct FfiConverterTypeSettings: FfiConverterRustBuffer {
         FfiConverterString.write(value.contactEmail, into: &buf)
         FfiConverterString.write(value.openalexApiKey, into: &buf)
         FfiConverterString.write(value.anthropicApiKey, into: &buf)
+        FfiConverterString.write(value.jevApiKey, into: &buf)
         FfiConverterOptionTypeWindowState.write(value.window, into: &buf)
         FfiConverterOptionDouble.write(value.sidebarWidth, into: &buf)
         FfiConverterOptionDouble.write(value.detailWidth, into: &buf)
@@ -3181,6 +3263,114 @@ public func FfiConverterTypeTag_lift(_ buf: RustBuffer) throws -> Tag {
 #endif
 public func FfiConverterTypeTag_lower(_ value: Tag) -> RustBuffer {
     return FfiConverterTypeTag.lower(value)
+}
+
+
+public struct Topic: Equatable, Hashable {
+    public var name: String
+    public var description: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, description: String) {
+        self.name = name
+        self.description = description
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension Topic: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTopic: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Topic {
+        return
+            try Topic(
+                name: FfiConverterString.read(from: &buf), 
+                description: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Topic, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.description, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTopic_lift(_ buf: RustBuffer) throws -> Topic {
+    return try FfiConverterTypeTopic.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTopic_lower(_ value: Topic) -> RustBuffer {
+    return FfiConverterTypeTopic.lower(value)
+}
+
+
+public struct TopicTags: Equatable, Hashable {
+    public var itemId: String
+    public var tags: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(itemId: String, tags: [String]) {
+        self.itemId = itemId
+        self.tags = tags
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension TopicTags: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTopicTags: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TopicTags {
+        return
+            try TopicTags(
+                itemId: FfiConverterString.read(from: &buf), 
+                tags: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TopicTags, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.itemId, into: &buf)
+        FfiConverterSequenceString.write(value.tags, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTopicTags_lift(_ buf: RustBuffer) throws -> TopicTags {
+    return try FfiConverterTypeTopicTags.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTopicTags_lower(_ value: TopicTags) -> RustBuffer {
+    return FfiConverterTypeTopicTags.lower(value)
 }
 
 
@@ -4724,6 +4914,56 @@ fileprivate struct FfiConverterSequenceTypeTag: FfiConverterRustBuffer {
         return seq
     }
 }
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeTopic: FfiConverterRustBuffer {
+    typealias SwiftType = [Topic]
+
+    public static func write(_ value: [Topic], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeTopic.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Topic] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Topic]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeTopic.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeTopicTags: FfiConverterRustBuffer {
+    typealias SwiftType = [TopicTags]
+
+    public static func write(_ value: [TopicTags], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeTopicTags.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [TopicTags] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [TopicTags]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeTopicTags.read(from: &buf))
+        }
+        return seq
+    }
+}
 private let UNIFFI_RUST_FUTURE_POLL_READY: Int8 = 0
 private let UNIFFI_RUST_FUTURE_POLL_WAKE: Int8 = 1
 
@@ -4953,10 +5193,19 @@ private let initializationResult: InitializationResult = {
     if (uniffi_paper_ffi_checksum_method_engine_set_tags() != 64458) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_paper_ffi_checksum_method_engine_set_topics() != 23466) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_paper_ffi_checksum_method_engine_settings() != 24713) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_paper_ffi_checksum_method_engine_tag_with_topics() != 59100) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_paper_ffi_checksum_method_engine_tags() != 12659) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paper_ffi_checksum_method_engine_topics() != 50522) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_undo_delete() != 14067) {
@@ -4987,6 +5236,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engineobserver_pdf_step() != 60869) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paper_ffi_checksum_method_engineobserver_topics_added() != 63518) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_constructor_engine_create_library() != 7097) {
