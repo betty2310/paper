@@ -582,10 +582,12 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         let page: PDFPage?, rect: CGRect
         switch markupTarget {
         case .selection(let selection):
-            // Over the part on the first page, where the reading started.
-            page = selection.pages.first
-            guard let page else { return nil }
-            rect = selection.bounds(for: page)
+            // Over the part on the first page, where the reading started. A
+            // drag that starts in a page's margin lists that page with null
+            // bounds, which convert to NaN, so skip pages without text.
+            guard let first = selection.pages.first(where: { !selection.bounds(for: $0).isEmpty }) else { return nil }
+            page = first
+            rect = selection.bounds(for: first)
         case .highlight(let id):
             guard let annotation = annotations[id] else { return nil }
             page = pdfView.document?.page(at: Int(annotation.pageIndex))
