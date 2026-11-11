@@ -82,6 +82,7 @@ Rejected: `citeproc-rs` (abandoned). `biblatex` for writing (its output is fine,
 | Clipboard | none | `NSPasteboard` |
 | File dialogs | none | `NSOpenPanel`, `NSSavePanel` |
 | Updates | none | Sparkle 2 |
+| Crash reports | none | Sentry (`sentry-cocoa`), crash reports only, after the user agrees |
 | Fonts | none | Source Serif 4 and Inter bundled, `ATSApplicationFontsPath` in Info.plist |
 
 ## 11. Toolchain and build

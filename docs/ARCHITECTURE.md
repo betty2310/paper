@@ -32,7 +32,7 @@ paper/
 └── .github/workflows/
 ```
 
-Dependency direction is strictly `paper-ffi` → `paper-engine` → (`paper-core`, `paper-ids`, `paper-fetch`, `paper-identify`, `paper-cite`), and `paper-core` depends on nothing else in the workspace. `paper-identify` depends only on `paper-ids` and the pure Rust `pdf_oxide`, never touches the network, and runs the same on every platform; it is how the engine reads a PDF it is given, separate from the app's reader. `paper-fetch` returns plain data types defined in `paper-core`. `paper-pdf` is behind a `pdfium` cargo feature of `paper-engine` that the macOS build leaves off. The Swift app depends only on the `PaperEngine` package and never opens the database, calls the network, or reads API responses itself.
+Dependency direction is strictly `paper-ffi` → `paper-engine` → (`paper-core`, `paper-ids`, `paper-fetch`, `paper-identify`, `paper-cite`), and `paper-core` depends on nothing else in the workspace. `paper-identify` depends only on `paper-ids` and the pure Rust `pdf_oxide`, never touches the network, and runs the same on every platform; it is how the engine reads a PDF it is given, separate from the app's reader. `paper-fetch` returns plain data types defined in `paper-core`. `paper-pdf` is behind a `pdfium` cargo feature of `paper-engine` that the macOS build leaves off. The Swift app depends only on the `PaperEngine` package and never opens the database, calls the network, or reads API responses itself. The exceptions are Sparkle's update checks and the Sentry SDK, which sends crash reports when the user agreed to it.
 
 ```diagram
 ┌──────────────────────────────────────────────────────────────┐

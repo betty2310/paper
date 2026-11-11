@@ -24,7 +24,7 @@ Highlight, underline, strikeout, sticky note, rectangle, colors, the floating ma
 
 ## Milestone 4: citations and packaging
 
-Copy BibTeX, copy APA, export .bib, citation keys, settings window (contact email, OpenAlex key), library chooser and recent libraries, App Sandbox and Hardened Runtime, signed and notarized DMG, Sparkle updates, crash and error reporting to a local log, snapshot tests at 1x and 2x for every screen state.
+Copy BibTeX, copy APA, export .bib, citation keys, settings window (contact email, OpenAlex key), library chooser and recent libraries, App Sandbox and Hardened Runtime, signed and notarized DMG, Sparkle updates, crash reports through Sentry when the user agrees, error reporting to a local log, snapshot tests at 1x and 2x for every screen state.
 
 ## Milestone 5: Zotero import and 1.0
 

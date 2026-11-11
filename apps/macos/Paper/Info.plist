@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- Info.plist of Paper.app. scripts/package-macos-app.sh fills in the
-     version and the Sparkle public key. -->
+     version and the Sparkle public key. SentryDSN is where crash reports go,
+     when the user agrees to send them. -->
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
@@ -38,6 +39,8 @@
 	<string>https://github.com/betty2310/paper/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string></string>
+	<key>SentryDSN</key>
+	<string>https://2e9ac5a32a2703e9e279e587eba1e707@o4512412237955072.ingest.us.sentry.io/4512412246933504</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 </dict>

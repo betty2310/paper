@@ -21,6 +21,8 @@ After changing the engine API in `crates/paper-engine` and `crates/paper-ffi`, r
 
 Pushing a tag such as `v0.2.0` runs [`.github/workflows/release.yml`](.github/workflows/release.yml) on a macOS runner. It calls `scripts/package-macos-app.sh 0.2.0`, which builds a universal `Paper.app`, signs it, zips it, and writes a Sparkle `appcast.xml`. Then it publishes both files as the GitHub release. A tag run cannot restore caches that other tags saved, so [`.github/workflows/rust-cache.yml`](.github/workflows/rust-cache.yml) compiles the Rust dependencies on `main` (when a `Cargo.toml` or `Cargo.lock` changes, and weekly) and the release restores them. A tag pushed before that run finishes builds them from scratch. The app checks `releases/latest/download/appcast.xml` once a day and offers the update. Paper › Check for Updates… checks right away. Sparkle installs an update only when the zip's EdDSA signature matches the public key built into the running app.
 
+Paper.app asks on first launch whether to send crash reports, and Settings can change the answer later. A yes starts the Sentry SDK with everything but crash reporting turned off: no tracing, sessions, breadcrumbs, hang reports, or failed request reports. Before a report leaves, [`CrashReports.swift`](apps/macos/Paper/CrashReports.swift) drops the installation id and the hash of the Mac and app, and replaces the home folder in file paths with `~`. The DSN is the `SentryDSN` key in `Info.plist`, which `swift run` does not read, so development builds never report. The release workflow uploads the dSYMs that `package-macos-app.sh` leaves in `dist/`, so reports name Paper's functions and lines.
+
 There is no Apple Developer ID yet. The app is signed with a self-signed certificate (or ad hoc if none is set up) and is not notarized.
 
 One-time setup, on your Mac:
@@ -37,6 +39,9 @@ scripts/create-signing-cert.sh '<password>'
 base64 -i signing/paper-signing.p12 | gh secret set MACOS_CERT_P12
 gh secret set MACOS_CERT_PASSWORD --body '<password>'
 security add-trusted-cert -r trustRoot -p codeSign -k ~/Library/Keychains/login.keychain-db signing/paper-signing.cer
+
+# Sentry organization token (Settings › Organization Tokens), for the dSYM upload.
+gh secret set SENTRY_AUTH_TOKEN
 ```
 
 Keep the Sparkle key and `signing/` safe. If you lose the Sparkle key, installed copies cannot verify new updates.

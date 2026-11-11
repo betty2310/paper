@@ -11,6 +11,7 @@ let package = Package(
     dependencies: [
         .package(path: "PaperEngine"),
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.10.0"),
+        .package(url: "https://github.com/getsentry/sentry-cocoa", from: "9.33.0"),
     ],
     targets: [
         .executableTarget(
@@ -18,6 +19,7 @@ let package = Package(
             dependencies: [
                 .product(name: "PaperEngine", package: "PaperEngine"),
                 .product(name: "Sparkle", package: "Sparkle"),
+                .product(name: "Sentry", package: "sentry-cocoa"),
             ],
             path: "Paper",
             exclude: ["Info.plist", "Resources/AppIcon.iconset"],

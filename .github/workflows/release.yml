@@ -8,6 +8,8 @@
 #                                 scripts/create-signing-cert.sh (optional;
 #                                 without it the app is signed ad hoc)
 #   secret   MACOS_CERT_PASSWORD  password of that .p12
+#   secret   SENTRY_AUTH_TOKEN    Sentry organization token, to upload debug
+#                                 symbols for crash reports (optional)
 name: Release
 
 on:
@@ -74,6 +76,19 @@ jobs:
           SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: scripts/package-macos-app.sh "${GITHUB_REF_NAME#v}"
+
+      - name: Upload debug symbols to Sentry
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          # The numbers in SentryDSN of apps/macos/Paper/Info.plist.
+          SENTRY_ORG: "4512412237955072"
+          SENTRY_PROJECT: "4512412246933504"
+        run: |
+          if [[ -z "$SENTRY_AUTH_TOKEN" ]]; then
+            echo "::warning::SENTRY_AUTH_TOKEN is not set; crash reports from this release show Paper's frames as addresses."
+            exit 0
+          fi
+          npx --yes @sentry/cli@2 debug-files upload --wait dist/*.dSYM
 
       - name: Publish the release
         env:

@@ -1,7 +1,8 @@
 import PaperEngine
 import SwiftUI
 
-/// Library settings the user may change: what the metadata APIs see.
+/// Library settings the user may change: what the metadata APIs see, and
+/// whether Paper sends crash reports.
 struct SettingsView: View {
     @ObservedObject var store: LibraryStore
     @State private var contactEmail: String
@@ -9,6 +10,8 @@ struct SettingsView: View {
     @State private var anthropicApiKey: String
     @State private var jevApiKey: String
     @State private var editingTopics = false
+    /// For the app, not the library; the others are the library's own.
+    @AppStorage(CrashReports.enabledKey) private var sendCrashReports = false
 
     init(store: LibraryStore) {
         self.store = store
@@ -55,6 +58,15 @@ struct SettingsView: View {
                     Button("Edit Topics…") { editingTopics = true }
                 }
             }
+            if CrashReports.isAvailable {
+                Section {
+                    Toggle("Send crash reports", isOn: $sendCrashReports)
+                    Text(CrashReports.explanation)
+                        .font(Theme.Font.swiftUICaption)
+                        .foregroundStyle(Theme.Color.swiftUISecondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             Section {
                 LabeledContent("Library", value: store.libraryPath)
                     .font(Theme.Font.swiftUISecondary)
@@ -67,6 +79,7 @@ struct SettingsView: View {
         .onChange(of: openalexApiKey) { save() }
         .onChange(of: anthropicApiKey) { save() }
         .onChange(of: jevApiKey) { save() }
+        .onChange(of: sendCrashReports) { CrashReports.update() }
         .sheet(isPresented: $editingTopics) { TopicsEditor(store: store) }
     }
 

@@ -2,6 +2,7 @@
 # Builds a universal Paper.app, signs it, and zips it into dist/ for a release.
 # With a Sparkle private key it also signs the zip for Sparkle and writes
 # dist/appcast.xml, the update feed that SUFeedURL in Info.plist points to.
+# It also leaves one dSYM per architecture in dist/ for Sentry.
 # macOS only.
 #
 # Usage: scripts/package-macos-app.sh <version>      (for example 0.2.0)
@@ -40,6 +41,9 @@ for arch in arm64 x86_64; do
   "${build[@]}"
   bin="$("${build[@]}" --show-bin-path)"
   cp "$bin/Paper" "$dist/Paper-$arch"
+  # Debug symbols for Sentry, which shows Paper's frames in crash reports as
+  # addresses without them. Before the next build replaces the objects.
+  dsymutil "$bin/Paper" -o "$dist/Paper-$arch.dSYM"
 done
 lipo -create "$dist"/Paper-{arm64,x86_64} -output "$app/Contents/MacOS/Paper"
 rm "$dist"/Paper-{arm64,x86_64}

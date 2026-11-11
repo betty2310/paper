@@ -18,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     // MARK: Launch
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // First, so a crash while the library opens is reported too.
+        CrashReports.update()
         if Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") != nil {
             updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
         }
@@ -42,6 +44,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         } else {
             showWelcome()
         }
+        // Over the window that just opened, once the run loop has shown it.
+        DispatchQueue.main.async { CrashReports.askOnce() }
     }
 
     /// Quitting closes no windows, so each one saves its layout here.
