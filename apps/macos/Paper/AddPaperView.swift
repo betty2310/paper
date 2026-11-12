@@ -18,7 +18,7 @@ struct AddPaperView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Size.gap) {
             Text("Add Paper")
-                .font(.headline)
+                .font(Theme.Font.swiftUIHeadline)
             TextField("DOI, doi.org link, or arXiv ID", text: $text)
                 .textFieldStyle(.roundedBorder)
                 .focused($focused)
@@ -60,6 +60,7 @@ struct AddPaperView: View {
         }
         .padding(Theme.Size.padding)
         .frame(width: Theme.Size.popoverWidth)
+        .font(Theme.Font.swiftUIDefault)
         .onAppear {
             focused = true
             // Start with the clipboard when it already holds an identifier.

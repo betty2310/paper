@@ -1,9 +1,39 @@
+import AppKit
 import PaperEngine
 import SwiftUI
 
+/// The Settings window's content: one toolbar tab per pane, as Mac apps
+/// have. Each pane fills the window, which the user may resize.
+final class SettingsViewController: NSTabViewController {
+    let store: LibraryStore
+
+    init(store: LibraryStore) {
+        self.store = store
+        super.init(nibName: nil, bundle: nil)
+        tabStyle = .toolbar
+        addPane(GeneralSettingsView(store: store), label: "General", symbol: Theme.Symbol.generalSettings)
+        addPane(AppearanceSettingsView(), label: "Appearance", symbol: Theme.Symbol.appearanceSettings)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    private func addPane(_ pane: some View, label: String, symbol: String) {
+        let host = NSHostingController(rootView: pane)
+        // The window takes the selected pane's title.
+        host.title = label
+        // The window keeps the size the user gave it, whichever pane shows.
+        host.sizingOptions = []
+        let item = NSTabViewItem(viewController: host)
+        item.label = label
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        addTabViewItem(item)
+    }
+}
+
 /// Library settings the user may change: what the metadata APIs see, and
 /// whether Paper sends crash reports.
-struct SettingsView: View {
+struct GeneralSettingsView: View {
     @ObservedObject var store: LibraryStore
     @State private var contactEmail: String
     @State private var openalexApiKey: String
@@ -73,8 +103,8 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        // A grouped form scrolls and so has no height of its own to size the window by.
-        .frame(width: Theme.Size.settingsWidth, height: Theme.Size.settingsHeight)
+        .font(Theme.Font.swiftUIDefault)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onChange(of: contactEmail) { save() }
         .onChange(of: openalexApiKey) { save() }
         .onChange(of: anthropicApiKey) { save() }
@@ -96,6 +126,56 @@ struct SettingsView: View {
         settings.anthropicApiKey = anthropicKey
         settings.jevApiKey = jevKey
         store.updateSettings(settings)
+    }
+}
+
+/// The app's look, the same in every library: for now, its two fonts.
+struct AppearanceSettingsView: View {
+    @Bindable private var fonts = FontChoice.shared
+    private let families = NSFontManager.shared.availableFontFamilies.filter { !$0.hasPrefix(".") }
+
+    var body: some View {
+        Form {
+            Section {
+                picker("Title font", selection: $fonts.titleFamily, system: "New York")
+                picker("Interface font", selection: $fonts.interfaceFamily, system: "San Francisco")
+                Text("The title font sets paper titles in the list, the tabs, and the inspector. The interface font sets everything else.")
+                    .font(Theme.Font.swiftUICaption)
+                    .foregroundStyle(Theme.Color.swiftUISecondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Section {
+                VStack(alignment: .leading, spacing: Theme.Size.smallGap) {
+                    Text("Attention Is All You Need")
+                        .font(Theme.Font.swiftUIInspectorTitle)
+                        .foregroundStyle(Theme.Color.swiftUIText)
+                    Text("Vaswani, Shazeer, Parmar, et al. · NeurIPS · 2017")
+                        .font(Theme.Font.swiftUISecondary)
+                        .foregroundStyle(Theme.Color.swiftUISecondaryText)
+                }
+                .padding(.vertical, Theme.Size.smallGap)
+                .accessibilityElement(children: .combine)
+            } header: {
+                // A header set in the form's font would lose the system's weight.
+                Text("Preview").font(Theme.Font.swiftUIHeadline)
+            }
+        }
+        .formStyle(.grouped)
+        .font(Theme.Font.swiftUIDefault)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// The system's font first, then every installed family. A family
+    /// picked once and since removed still shows as picked.
+    private func picker(_ label: String, selection: Binding<String?>, system: String) -> some View {
+        let missing = selection.wrappedValue.flatMap { families.contains($0) ? nil : $0 }
+        return Picker(label, selection: selection) {
+            Text("\(system) (System)").tag(String?.none)
+            Divider()
+            ForEach((missing.map { [$0] } ?? []) + families, id: \.self) { family in
+                Text(family).tag(String?.some(family))
+            }
+        }
     }
 }
 
@@ -178,6 +258,7 @@ struct TopicsEditor: View {
             .padding(Theme.Size.padding)
         }
         .frame(width: Theme.Size.topicsEditorWidth, height: Theme.Size.topicsEditorHeight)
+        .font(Theme.Font.swiftUIDefault)
     }
 
     /// Rows left without a name are dropped; the engine refuses a name twice.

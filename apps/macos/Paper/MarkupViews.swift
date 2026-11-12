@@ -112,6 +112,7 @@ struct NoteEditor: View {
         }
         .padding(Theme.Size.padding)
         .frame(width: Theme.Size.noteEditorWidth)
+        .font(Theme.Font.swiftUIDefault)
         .onAppear { focused = true }
     }
 }

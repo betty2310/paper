@@ -1055,9 +1055,9 @@ final class TitleView: NSView {
 
     init() {
         super.init(frame: .zero)
-        title.font = Theme.Font.windowTitle
+        applyFonts()
+        NotificationCenter.default.addObserver(self, selector: #selector(applyFonts), name: Theme.Font.didChange, object: nil)
         title.textColor = Theme.Color.text
-        subtitle.font = Theme.Font.windowSubtitle
         subtitle.textColor = Theme.Color.secondaryText
         for label in [title, subtitle] {
             label.lineBreakMode = .byTruncatingTail
@@ -1083,6 +1083,11 @@ final class TitleView: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    @objc private func applyFonts() {
+        title.font = Theme.Font.windowTitle
+        subtitle.font = Theme.Font.windowSubtitle
+    }
 
     func set(title text: String, subtitle detail: String) {
         title.stringValue = text

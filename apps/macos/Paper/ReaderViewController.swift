@@ -87,6 +87,10 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
+    @objc private func applyFonts() {
+        failureLabel.font = Theme.Font.body
+    }
+
     override func loadView() {
         let root = NSView()
         root.wantsLayer = true
@@ -101,7 +105,8 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         pdfView.autoScales = true
         pdfView.setAccessibilityLabel(paperTitle)
 
-        failureLabel.font = Theme.Font.body
+        applyFonts()
+        NotificationCenter.default.addObserver(self, selector: #selector(applyFonts), name: Theme.Font.didChange, object: nil)
         failureLabel.textColor = Theme.Color.secondaryText
         failureLabel.isHidden = true
 

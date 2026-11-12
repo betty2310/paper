@@ -37,6 +37,10 @@ final class ReaderOutlineViewController: NSViewController, NSOutlineViewDataSour
     private var ordered: [Entry] = []
     private var suppressSelectionChange = false
 
+    @objc private func applyFonts() {
+        emptyLabel.font = Theme.Font.body
+    }
+
     override func loadView() {
         let root = NSView()
 
@@ -59,7 +63,8 @@ final class ReaderOutlineViewController: NSViewController, NSOutlineViewDataSour
         scrollView.drawsBackground = false
         scrollView.automaticallyAdjustsContentInsets = true
 
-        emptyLabel.font = Theme.Font.body
+        applyFonts()
+        NotificationCenter.default.addObserver(self, selector: #selector(applyFonts), name: Theme.Font.didChange, object: nil)
         emptyLabel.textColor = Theme.Color.tertiaryText
         emptyLabel.alignment = .center
         emptyLabel.isHidden = true
@@ -198,10 +203,10 @@ private final class OutlineCellView: NSTableCellView {
     init(identifier: NSUserInterfaceItemIdentifier) {
         super.init(frame: .zero)
         self.identifier = identifier
-        label.font = Theme.Font.sidebar
+        applyFonts()
+        NotificationCenter.default.addObserver(self, selector: #selector(applyFonts), name: Theme.Font.didChange, object: nil)
         label.lineBreakMode = .byTruncatingTail
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        page.font = Theme.Font.sidebarBadge
         page.textColor = Theme.Color.secondaryText
         page.alignment = .right
         page.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -222,6 +227,11 @@ private final class OutlineCellView: NSTableCellView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    @objc private func applyFonts() {
+        label.font = Theme.Font.sidebar
+        page.font = Theme.Font.sidebarBadge
+    }
 
     func configure(title: String, page number: Int?) {
         label.stringValue = title

@@ -4,8 +4,8 @@ import SwiftUI
 /// Every size, color, font, and duration the views use, defined once.
 ///
 /// Colors are the system's semantic colors, so the app follows Light and Dark
-/// Mode and the user's accent color like any first party Mac app. Titles use
-/// the system serif design (New York); everything else is San Francisco.
+/// Mode and the user's accent color like any first party Mac app. Fonts
+/// follow the user's choice in Settings > Appearance; see `Font`.
 @MainActor
 enum Theme {
     enum Size {
@@ -77,8 +77,12 @@ enum Theme {
         static let popoverWidth: CGFloat = 360
         static let welcomeWidth: CGFloat = 520
         static let welcomeHeight: CGFloat = 420
-        static let settingsWidth: CGFloat = 460
-        static let settingsHeight: CGFloat = 360
+        /// The Settings window opens at this size; the user may resize it
+        /// down to the minimum.
+        static let settingsWidth: CGFloat = 520
+        static let settingsHeight: CGFloat = 520
+        static let settingsMinWidth: CGFloat = 420
+        static let settingsMinHeight: CGFloat = 280
         /// The sheet that edits a paper's fields or takes a new paper's.
         static let metadataEditorWidth: CGFloat = 520
         static let metadataEditorHeight: CGFloat = 640
@@ -246,60 +250,122 @@ enum Theme {
         static let glassTint: Double = 0.6
     }
 
+    /// Paper titles use the title font, the system serif (New York) unless
+    /// the user picked another in Settings; the rest uses the interface
+    /// font, San Francisco unless the user picked another. Icons and code
+    /// keep the system fonts. Every font is read when it is used: SwiftUI
+    /// views redraw on their own when the choice changes, and AppKit views
+    /// set their fonts again on `didChange`.
     @MainActor enum Font {
+        /// Posted on the main thread when the user picks another font.
+        static let didChange = Notification.Name("PaperFontsDidChange")
+
         /// Paper titles in the list.
-        static let rowTitle = serif(size: 15, weight: .regular)
+        static var rowTitle: NSFont { title(size: 15) }
         /// Paper titles in tabs.
-        static let tabTitle = serif(size: 13, weight: .regular)
+        static var tabTitle: NSFont { title(size: 13) }
         /// The letter on a pinned tab's tile.
-        static let tabPinnedLetter = serif(size: 11, weight: .semibold)
+        static var tabPinnedLetter: NSFont { title(size: 11, weight: .semibold) }
         /// The selected paper's title in the inspector.
-        static let inspectorTitle = serif(size: 20, weight: .semibold)
+        static var inspectorTitle: NSFont { title(size: 20, weight: .semibold) }
         /// The window title and subtitle in the toolbar, as the system draws them.
-        static let windowTitle = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .bold)
-        static let windowSubtitle = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
-        static let body = NSFont.systemFont(ofSize: NSFont.systemFontSize)
-        static let secondary = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
-        static let caption = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize - 1, weight: .medium)
-        static let sidebar = NSFont.systemFont(ofSize: NSFont.systemFontSize)
-        static let sidebarBadge = NSFont.monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
+        static var windowTitle: NSFont { interface(size: NSFont.systemFontSize, weight: .bold) }
+        static var windowSubtitle: NSFont { interface(size: NSFont.smallSystemFontSize) }
+        static var body: NSFont { interface(size: NSFont.systemFontSize) }
+        static var secondary: NSFont { interface(size: NSFont.smallSystemFontSize) }
+        static var caption: NSFont { interface(size: NSFont.smallSystemFontSize - 1, weight: .medium) }
+        static var sidebar: NSFont { interface(size: NSFont.systemFontSize) }
+        static var sidebarBadge: NSFont { monospacedDigits(interface(size: NSFont.smallSystemFontSize, weight: .medium)) }
         static let monospaced = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
 
-        static let swiftUIInspectorTitle = SwiftUI.Font.system(size: 20, weight: .semibold, design: .serif)
-        static let swiftUIPaletteTitle = SwiftUI.Font.system(size: 15, weight: .regular, design: .serif)
-        static let swiftUIPaletteField = SwiftUI.Font.system(size: 20, weight: .regular)
+        static var swiftUIInspectorTitle: SwiftUI.Font { swiftUITitle(size: 20, weight: .semibold) }
+        static var swiftUIPaletteTitle: SwiftUI.Font { swiftUITitle(size: 15) }
+        static var swiftUIPaletteField: SwiftUI.Font { swiftUIInterface(size: 20) }
         static let swiftUIPaletteIcon = SwiftUI.Font.system(size: 18, weight: .medium)
-        static let swiftUIBody = SwiftUI.Font.body
-        static let swiftUISecondary = SwiftUI.Font.callout
-        static let swiftUICaption = SwiftUI.Font.caption
-        static let swiftUISectionLabel = SwiftUI.Font.caption.weight(.semibold)
+        static var swiftUIBody: SwiftUI.Font { swiftUIInterface(.body, size: NSFont.systemFontSize) }
+        static var swiftUIHeadline: SwiftUI.Font { swiftUIInterface(.headline, size: NSFont.systemFontSize, weight: .bold) }
+        static var swiftUISecondary: SwiftUI.Font { swiftUIInterface(.callout, size: calloutSize) }
+        static var swiftUICaption: SwiftUI.Font { swiftUIInterface(.caption, size: captionSize) }
+        static var swiftUISectionLabel: SwiftUI.Font { swiftUICaption.weight(.semibold) }
         /// An annotation's comment, and quotes in the rendered note.
-        static let swiftUIComment = SwiftUI.Font.body.italic()
+        static var swiftUIComment: SwiftUI.Font { swiftUIBody.italic() }
         static let swiftUICode = SwiftUI.Font.system(size: 12, design: .monospaced)
         /// Headings in the rendered note.
-        static let swiftUINoteHeading1 = SwiftUI.Font.system(size: 20, weight: .semibold)
-        static let swiftUINoteHeading2 = SwiftUI.Font.system(size: 16, weight: .semibold)
-        static let swiftUINoteHeading3 = SwiftUI.Font.system(size: 13, weight: .semibold)
-        static let swiftUIToastMessage = SwiftUI.Font.system(size: 13, weight: .medium)
-        static let swiftUIToastDetail = SwiftUI.Font.system(size: 12).monospacedDigit()
-        static let swiftUIToastSubject = SwiftUI.Font.system(size: 12, weight: .regular, design: .serif)
-        static let swiftUIToastAction = SwiftUI.Font.system(size: 12, weight: .semibold)
+        static var swiftUINoteHeading1: SwiftUI.Font { swiftUIInterface(size: 20, weight: .semibold) }
+        static var swiftUINoteHeading2: SwiftUI.Font { swiftUIInterface(size: 16, weight: .semibold) }
+        static var swiftUINoteHeading3: SwiftUI.Font { swiftUIInterface(size: 13, weight: .semibold) }
+        static var swiftUIToastMessage: SwiftUI.Font { swiftUIInterface(size: 13, weight: .medium) }
+        static var swiftUIToastDetail: SwiftUI.Font { swiftUIInterface(size: 12).monospacedDigit() }
+        static var swiftUIToastSubject: SwiftUI.Font { swiftUITitle(size: 12) }
+        static var swiftUIToastAction: SwiftUI.Font { swiftUIInterface(size: 12, weight: .semibold) }
         static let swiftUIToastClose = SwiftUI.Font.system(size: 10, weight: .bold)
         static let swiftUIReaderBarIcon = SwiftUI.Font.system(size: 13, weight: .medium)
-        static let swiftUIReaderBarLabel = SwiftUI.Font.system(size: 12, weight: .medium).monospacedDigit()
+        static var swiftUIReaderBarLabel: SwiftUI.Font { swiftUIInterface(size: 12, weight: .medium).monospacedDigit() }
         static let swiftUIDropIcon = SwiftUI.Font.system(size: 28, weight: .light)
-        static let swiftUIWelcomeTitle = SwiftUI.Font.system(size: 28, weight: .semibold, design: .serif)
+        static var swiftUIWelcomeTitle: SwiftUI.Font { swiftUITitle(size: 28, weight: .semibold) }
 
         /// The letter on a preview tile of a paper without a figure.
-        static let rowPreviewLetter = serif(size: 20, weight: .regular)
-        static let swiftUIInspectorPreviewLetter = SwiftUI.Font.system(size: 48, weight: .regular, design: .serif)
+        static var rowPreviewLetter: NSFont { title(size: 20) }
+        static var swiftUIInspectorPreviewLetter: SwiftUI.Font { swiftUITitle(size: 48) }
 
-        private static func serif(size: CGFloat, weight: NSFont.Weight) -> NSFont {
+        /// The font a hosted SwiftUI view gives text and controls that set
+        /// none: nil, the system's, until the user picks an interface font.
+        static var swiftUIDefault: SwiftUI.Font? {
+            FontChoice.shared.interfaceFamily == nil ? nil : swiftUIBody
+        }
+
+        /// The sizes of the SwiftUI text styles on the Mac.
+        private static let calloutSize: CGFloat = 12
+        private static let captionSize: CGFloat = 10
+
+        private static func title(size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
+            if let family = FontChoice.shared.titleFamily, let font = font(family: family, size: size, weight: weight) {
+                return font
+            }
             let base = NSFont.systemFont(ofSize: size, weight: weight)
             guard let descriptor = base.fontDescriptor.withDesign(.serif),
                   let font = NSFont(descriptor: descriptor, size: size)
             else { return base }
             return font
+        }
+
+        private static func interface(size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
+            if let family = FontChoice.shared.interfaceFamily, let font = font(family: family, size: size, weight: weight) {
+                return font
+            }
+            return NSFont.systemFont(ofSize: size, weight: weight)
+        }
+
+        /// The family's face nearest the weight, or nil when the family is
+        /// no longer installed.
+        private static func font(family: String, size: CGFloat, weight: NSFont.Weight) -> NSFont? {
+            let descriptor = NSFontDescriptor(fontAttributes: [
+                .family: family,
+                .traits: [NSFontDescriptor.TraitKey.weight: weight.rawValue],
+            ])
+            return NSFont(descriptor: descriptor, size: size)
+        }
+
+        private static func monospacedDigits(_ font: NSFont) -> NSFont {
+            let descriptor = font.fontDescriptor.addingAttributes([.featureSettings: [[
+                NSFontDescriptor.FeatureKey.typeIdentifier: kNumberSpacingType,
+                NSFontDescriptor.FeatureKey.selectorIdentifier: kMonospacedNumbersSelector,
+            ]]])
+            return NSFont(descriptor: descriptor, size: font.pointSize) ?? font
+        }
+
+        private static func swiftUITitle(size: CGFloat, weight: SwiftUI.Font.Weight = .regular) -> SwiftUI.Font {
+            guard let family = FontChoice.shared.titleFamily else {
+                return .system(size: size, weight: weight, design: .serif)
+            }
+            return .custom(family, size: size).weight(weight)
+        }
+
+        private static func swiftUIInterface(_ system: SwiftUI.Font? = nil, size: CGFloat, weight: SwiftUI.Font.Weight = .regular) -> SwiftUI.Font {
+            guard let family = FontChoice.shared.interfaceFamily else {
+                return system ?? .system(size: size, weight: weight)
+            }
+            return .custom(family, size: size).weight(weight)
         }
     }
 
@@ -516,5 +582,31 @@ enum Theme {
         static let taskDone = "checkmark.square.fill"
         static let favorite = "star"
         static let favoriteOn = "star.fill"
+        static let generalSettings = "gearshape"
+        static let appearanceSettings = "paintbrush"
+    }
+}
+
+/// The font families the user picked in Settings > Appearance, kept in the
+/// app's defaults for every library; nil is the system's font. Views read
+/// them through `Theme.Font`.
+@MainActor @Observable
+final class FontChoice {
+    static let shared = FontChoice()
+    private static let titleKey = "titleFontFamily"
+    private static let interfaceKey = "interfaceFontFamily"
+
+    var titleFamily = UserDefaults.standard.string(forKey: FontChoice.titleKey) {
+        didSet { save(titleFamily, as: Self.titleKey) }
+    }
+    var interfaceFamily = UserDefaults.standard.string(forKey: FontChoice.interfaceKey) {
+        didSet { save(interfaceFamily, as: Self.interfaceKey) }
+    }
+
+    private init() {}
+
+    private func save(_ family: String?, as key: String) {
+        UserDefaults.standard.set(family, forKey: key)
+        NotificationCenter.default.post(name: Theme.Font.didChange, object: nil)
     }
 }

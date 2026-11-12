@@ -382,15 +382,14 @@ final class PaperRowView: NSTableCellView {
         super.init(frame: .zero)
         self.identifier = identifier
 
-        title.font = Theme.Font.rowTitle
+        applyFonts()
+        NotificationCenter.default.addObserver(self, selector: #selector(applyFonts), name: Theme.Font.didChange, object: nil)
         title.textColor = Theme.Color.text
         title.lineBreakMode = .byTruncatingTail
         title.maximumNumberOfLines = 1
-        subtitle.font = Theme.Font.secondary
         subtitle.textColor = Theme.Color.secondaryText
         subtitle.lineBreakMode = .byTruncatingTail
         subtitle.maximumNumberOfLines = 1
-        added.font = Theme.Font.caption
         added.textColor = Theme.Color.tertiaryText
         added.alignment = .right
         status.symbolConfiguration = .init(pointSize: Theme.Size.statusIndicatorSize, weight: .regular)
@@ -434,6 +433,15 @@ final class PaperRowView: NSTableCellView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     private var lookupStatus: LookupStatus = .done
+    /// A row added by DOI is titled with the DOI until the lookup ends; a
+    /// dropped PDF's row has a real title from the start.
+    private var isDoiTitle = false
+
+    @objc private func applyFonts() {
+        title.font = isDoiTitle ? Theme.Font.monospaced : Theme.Font.rowTitle
+        subtitle.font = Theme.Font.secondary
+        added.font = Theme.Font.caption
+    }
 
     /// The serif title, which flies into the tab when the PDF opens.
     var titleField: NSTextField { title }
@@ -444,26 +452,22 @@ final class PaperRowView: NSTableCellView {
         updateFavorite()
         self.preview.show(preview)
         added.stringValue = Self.addedFormatter.string(from: item.addedAt)
-        // A row added by DOI is titled with the DOI until the lookup ends; a
-        // dropped PDF's row has a real title from the start.
-        let titleFont = item.doi != nil && item.title == item.doi ? Theme.Font.monospaced : Theme.Font.rowTitle
+        isDoiTitle = item.lookupStatus != .done && item.doi != nil && item.title == item.doi
+        applyFonts()
         switch item.lookupStatus {
         case .pending:
             title.stringValue = item.title
-            title.font = titleFont
             subtitle.stringValue = "Looking up metadata…"
             status.image = nil
             spinner.startAnimation(nil)
         case .failed:
             title.stringValue = item.title
-            title.font = titleFont
             subtitle.stringValue = item.doi == nil ? "Not identified. Add its DOI." : "Lookup failed"
             status.image = NSImage(systemSymbolName: Theme.Symbol.failed, accessibilityDescription: "Lookup failed")
             status.contentTintColor = Theme.Color.warning
             spinner.stopAnimation(nil)
         case .done:
             title.stringValue = item.title
-            title.font = Theme.Font.rowTitle
             subtitle.stringValue = item.subtitle
             status.contentTintColor = Theme.Color.secondaryText
             if !item.hasPdf, pdfStatus == .searching {
@@ -668,7 +672,8 @@ final class PaperPreviewTile: NSView {
         figure.minificationFilter = .trilinear
         figure.isHidden = true
         layer?.addSublayer(figure)
-        letter.font = Theme.Font.rowPreviewLetter
+        applyFonts()
+        NotificationCenter.default.addObserver(self, selector: #selector(applyFonts), name: Theme.Font.didChange, object: nil)
         letter.alignment = .center
         letter.translatesAutoresizingMaskIntoConstraints = false
         addSubview(letter)
@@ -683,6 +688,10 @@ final class PaperPreviewTile: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     override var wantsUpdateLayer: Bool { true }
+
+    @objc private func applyFonts() {
+        letter.font = Theme.Font.rowPreviewLetter
+    }
 
     func show(_ preview: PaperPreviews.Preview) {
         switch preview {

@@ -44,6 +44,7 @@ struct InspectorView: View {
         }
         // No background of its own: the inspector sits on the window's chrome.
         .frame(minWidth: Theme.Size.inspectorMinWidth, maxWidth: .infinity, maxHeight: .infinity)
+        .font(Theme.Font.swiftUIDefault)
     }
 }
 
@@ -779,19 +780,22 @@ struct MetadataEditor: View {
                 } header: {
                     if isNew {
                         Text("New Paper")
-                            .font(.headline)
+                            .font(Theme.Font.swiftUIHeadline)
                             .foregroundStyle(Theme.Color.swiftUIText)
                     }
                 }
-                Section("Abstract") {
+                Section {
                     TextField("Abstract", text: $abstractText, prompt: Text("Optional"), axis: .vertical)
                         .lineLimit(3...8)
                         .labelsHidden()
+                } header: {
+                    // A header set in the form's font would lose the system's weight.
+                    Text("Abstract").font(Theme.Font.swiftUIHeadline)
                 }
                 if isNew {
-                    Section("PDF") { pdfRow }
+                    Section { pdfRow } header: { Text("PDF").font(Theme.Font.swiftUIHeadline) }
                 }
-                Section("Venue") {
+                Section {
                     TextField("Journal or proceedings", text: $container)
                     TextField("Short name", text: $containerShort)
                     HStack {
@@ -800,14 +804,18 @@ struct MetadataEditor: View {
                         TextField("Issue", text: $issue)
                         TextField("Pages", text: $pages)
                     }
+                } header: {
+                    Text("Venue").font(Theme.Font.swiftUIHeadline)
                 }
-                Section("Identifiers") {
+                Section {
                     TextField("DOI", text: $doi)
                     TextField("arXiv ID", text: $arxivId)
                     TextField("URL", text: $url)
                     if !isNew {
                         TextField("Citation key", text: $citationKey, prompt: Text("Empty makes one from the metadata"))
                     }
+                } header: {
+                    Text("Identifiers").font(Theme.Font.swiftUIHeadline)
                 }
             }
             .formStyle(.grouped)
@@ -828,6 +836,7 @@ struct MetadataEditor: View {
             .padding(Theme.Size.padding)
         }
         .frame(width: Theme.Size.metadataEditorWidth, height: Theme.Size.metadataEditorHeight)
+        .font(Theme.Font.swiftUIDefault)
         .onAppear { if isNew { titleFocused = true } }
     }
 

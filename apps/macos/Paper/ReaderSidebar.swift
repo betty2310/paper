@@ -312,7 +312,8 @@ private final class PageCellView: NSTableCellView {
         thumbnailHeight = thumbnail.heightAnchor.constraint(equalToConstant: 0)
         super.init(frame: .zero)
         self.identifier = identifier
-        number.font = Theme.Font.sidebarBadge
+        applyFonts()
+        NotificationCenter.default.addObserver(self, selector: #selector(applyFonts), name: Theme.Font.didChange, object: nil)
         number.alignment = .center
         for subview in [thumbnail, number] {
             subview.translatesAutoresizingMaskIntoConstraints = false
@@ -331,6 +332,10 @@ private final class PageCellView: NSTableCellView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    @objc private func applyFonts() {
+        number.font = Theme.Font.sidebarBadge
+    }
 
     func configure(number page: Int, size: NSSize, image: NSImage?, isCurrent: Bool, isPressed: Bool) {
         self.isCurrent = isCurrent

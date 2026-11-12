@@ -44,6 +44,7 @@ struct WelcomeView: View {
                 .background(Color(nsColor: Theme.Color.listBackground))
         }
         .frame(width: Theme.Size.welcomeWidth, height: Theme.Size.welcomeHeight)
+        .font(Theme.Font.swiftUIDefault)
     }
 
     private var recentList: some View {

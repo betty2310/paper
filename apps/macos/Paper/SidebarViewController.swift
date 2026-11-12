@@ -66,6 +66,13 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         return nil
     }
 
+    private var newCollectionButton: NSPopUpButton?
+
+    @objc private func applyFonts() {
+        newCollectionButton?.font = Theme.Font.secondary
+        libraryLabel.font = Theme.Font.secondary
+    }
+
     override func loadView() {
         let root = NSView()
 
@@ -99,7 +106,6 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         // adds the subcollection choice.
         let plus = NSPopUpButton(frame: .zero, pullsDown: true)
         plus.isBordered = false
-        plus.font = Theme.Font.secondary
         plus.imagePosition = .imageLeading
         (plus.cell as? NSPopUpButtonCell)?.arrowPosition = .noArrow
         plus.setContentHuggingPriority(.required, for: .horizontal)
@@ -114,9 +120,11 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         plus.toolTip = "New collection"
         plus.setAccessibilityLabel("New collection")
 
-        libraryLabel.font = Theme.Font.secondary
         libraryLabel.textColor = Theme.Color.secondaryText
         libraryLabel.lineBreakMode = .byTruncatingMiddle
+        newCollectionButton = plus
+        applyFonts()
+        NotificationCenter.default.addObserver(self, selector: #selector(applyFonts), name: Theme.Font.didChange, object: nil)
         libraryLabel.stringValue = store.libraryName
         libraryLabel.toolTip = store.libraryPath
 
@@ -495,13 +503,13 @@ final class SidebarCellView: NSTableCellView {
         icon.contentTintColor = Theme.Color.accent
         dot.wantsLayer = true
         dot.layer?.cornerRadius = Theme.Size.tagDotSize / 2
-        label.font = Theme.Font.sidebar
+        applyFonts()
+        NotificationCenter.default.addObserver(self, selector: #selector(applyFonts), name: Theme.Font.didChange, object: nil)
         label.lineBreakMode = .byTruncatingTail
         label.isEditable = false
         label.isBordered = false
         label.drawsBackground = false
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        badge.font = Theme.Font.sidebarBadge
         badge.textColor = Theme.Color.secondaryText
         badge.alignment = .right
 
@@ -528,6 +536,11 @@ final class SidebarCellView: NSTableCellView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    @objc private func applyFonts() {
+        label.font = Theme.Font.sidebar
+        badge.font = Theme.Font.sidebarBadge
+    }
 
     func configure(title: String, symbol: String?, color: NSColor?, badge count: Int?, editable: Bool) {
         label.stringValue = title

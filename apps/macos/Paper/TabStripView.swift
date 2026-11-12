@@ -270,7 +270,6 @@ final class TabButton: NSView {
         layer?.cornerCurve = .continuous
 
         icon.symbolConfiguration = .init(pointSize: NSFont.systemFontSize, weight: .regular)
-        title.font = Theme.Font.tabTitle
         title.lineBreakMode = .byTruncatingTail
         title.maximumNumberOfLines = 1
         title.cell?.truncatesLastVisibleLine = true
@@ -290,7 +289,15 @@ final class TabButton: NSView {
         focusRingType = .exterior
         setAccessibilityElement(true)
         setAccessibilityRole(.radioButton)
+        applyFonts()
+        NotificationCenter.default.addObserver(self, selector: #selector(applyFonts), name: Theme.Font.didChange, object: nil)
+    }
+
+    /// The pinned letter tile is drawn in the title font, so it is drawn again.
+    @objc private func applyFonts() {
+        title.font = Theme.Font.tabTitle
         configure()
+        needsLayout = true
     }
 
     /// The icon, title, and labels for the tab as it is now.

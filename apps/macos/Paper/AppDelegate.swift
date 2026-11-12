@@ -195,23 +195,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         NSApp.orderFrontStandardAboutPanel(options: options)
     }
 
+    /// One Settings window, for the library in front. It keeps its size and
+    /// tab when another library comes to the front.
     @objc func showSettings(_ sender: Any?) {
         guard let store = frontStore else { return }
-        if settingsWindow == nil {
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: Theme.Size.settingsWidth, height: 0),
-                styleMask: [.titled, .closable],
-                backing: .buffered,
-                defer: false
-            )
-            window.title = "Settings"
-            window.isReleasedWhenClosed = false
-            window.center()
-            settingsWindow = window
+        let previous = settingsWindow?.contentViewController as? SettingsViewController
+        if previous?.store !== store {
+            let controller = SettingsViewController(store: store)
+            controller.selectedTabViewItemIndex = previous?.selectedTabViewItemIndex ?? 0
+            if let window = settingsWindow {
+                let frame = window.frame
+                window.contentViewController = controller
+                window.setFrame(frame, display: false)
+            } else {
+                let window = NSWindow(contentViewController: controller)
+                window.styleMask = [.titled, .closable, .resizable]
+                window.toolbarStyle = .preference
+                window.isReleasedWhenClosed = false
+                window.contentMinSize = NSSize(width: Theme.Size.settingsMinWidth, height: Theme.Size.settingsMinHeight)
+                window.setContentSize(NSSize(width: Theme.Size.settingsWidth, height: Theme.Size.settingsHeight))
+                if !window.setFrameUsingName(Self.settingsFrameName) { window.center() }
+                window.setFrameAutosaveName(Self.settingsFrameName)
+                settingsWindow = window
+            }
         }
-        settingsWindow?.contentViewController = NSHostingController(rootView: SettingsView(store: store))
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
+
+    private static let settingsFrameName = "Settings"
 
     private var frontStore: LibraryStore? {
         (NSApp.keyWindow?.windowController as? MainWindowController)?.store

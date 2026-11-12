@@ -95,6 +95,7 @@ struct ReaderPanel: View {
         }
         // No background of its own: the panel sits on the window's chrome.
         .frame(minWidth: Theme.Size.inspectorMinWidth, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .font(Theme.Font.swiftUIDefault)
     }
 }
 
