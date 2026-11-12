@@ -225,8 +225,17 @@ enum Theme {
         /// The ring around a color dot under the pointer.
         static let swiftUIDotHoverRing = SwiftUI.Color(nsColor: NSColor.labelColor.withAlphaComponent(0.25))
         static let swiftUIPanel = SwiftUI.Color(nsColor: .controlBackgroundColor)
-        /// Keeps text on the palette's glass readable over busy windows.
-        static let paletteTint = NSColor.windowBackgroundColor.withAlphaComponent(Opacity.glassTint)
+        /// Keeps text on the palette's glass readable over busy windows. Built
+        /// per appearance: `withAlphaComponent` on a system color keeps the
+        /// shade of the appearance it first ran in, so a palette first shown
+        /// in Dark Mode stayed dark, and looked gray, in Light Mode.
+        static let paletteTint = NSColor(name: nil) { appearance in
+            var color = NSColor.windowBackgroundColor
+            appearance.performAsCurrentDrawingAppearance {
+                color = NSColor.windowBackgroundColor.usingColorSpace(.sRGB) ?? color
+            }
+            return color.withAlphaComponent(Opacity.glassTint)
+        }
     }
 
     /// Accent fills behind text: light enough that the text keeps its color.

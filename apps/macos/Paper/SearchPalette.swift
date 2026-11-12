@@ -17,6 +17,9 @@ final class SearchPaletteController: NSObject, NSWindowDelegate {
     /// The content's last measured size; it only reports changes, so reopening
     /// with the same results must reuse it.
     private var contentSize = NSSize(width: Theme.Size.paletteWidth, height: Theme.Size.paletteFieldHeight)
+    /// Brings the library forward, for a result shown in the list while a
+    /// PDF is in front.
+    var onShowLibrary: (() -> Void)?
 
     init(store: LibraryStore) {
         self.store = store
@@ -29,6 +32,7 @@ final class SearchPaletteController: NSObject, NSWindowDelegate {
         // push the content down and leave the window background showing.
         host.safeAreaRegions = []
         model.onDismiss = { [weak self] in self?.dismiss() }
+        model.onShowLibrary = { [weak self] in self?.onShowLibrary?() }
         model.onResize = { [weak self] size in
             self?.contentSize = size
             // SwiftUI reports the size from inside a layout pass. Resizing the
@@ -163,6 +167,7 @@ final class SearchPaletteModel: ObservableObject {
     @Published private(set) var showsRecent = false
 
     var onDismiss: (() -> Void)?
+    var onShowLibrary: (() -> Void)?
     var onResize: ((CGSize) -> Void)?
 
     private let store: LibraryStore
@@ -206,8 +211,10 @@ final class SearchPaletteModel: ObservableObject {
         case .add(let identifier):
             store.add(identifier: identifier)
         case .paper(let item):
+            onShowLibrary?()
             store.select(item.id)
         case .showAll(_, let text):
+            onShowLibrary?()
             store.scope = .all
             store.searchText = text
         }

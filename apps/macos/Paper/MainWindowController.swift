@@ -142,6 +142,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             .sink { [weak self] scope, items in self?.updateTitle(scope: scope, count: items.count) }
             .store(in: &subscriptions)
 
+        searchPalette.onShowLibrary = { [weak self] in self?.showLibrary() }
         tabStrip.onSelect = { [weak self] id in self?.selectTab(id) }
         tabStrip.onClose = { [weak self] id in self?.closeReader(itemId: id) }
         tabStrip.onTogglePin = { [weak self] id in self?.togglePin(itemId: id) }
@@ -345,7 +346,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     @objc func showSearch(_ sender: Any?) {
         guard let window else { return }
-        showLibrary()
+        // The palette opens over the PDF in front; only a result that shows
+        // something in the list brings the library forward.
         addPopover.performClose(nil)
         searchPalette.toggle(over: window)
     }
