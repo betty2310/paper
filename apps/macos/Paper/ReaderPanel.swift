@@ -2,61 +2,12 @@ import AppKit
 import PaperEngine
 import SwiftUI
 
-/// The detail panel while a PDF's tab is in front: the PDF's annotations as
-/// cards in page order, or the paper's Markdown note. A switch at the top
-/// picks one; the choice is shared by every PDF and remembered across
-/// launches.
-@MainActor
-final class ReaderPanelViewController: NSViewController {
-    let model = ReaderPanelModel()
-    private let store: LibraryStore
-    private let itemId: String
-
-    init(store: LibraryStore, itemId: String) {
-        self.store = store
-        self.itemId = itemId
-        super.init(nibName: nil, bundle: nil)
-        model.noteEdited = { [weak store] markdown in
-            store?.scheduleNoteSave(itemId: itemId, markdown: markdown)
-        }
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    override func loadView() {
-        let host = NSHostingView(rootView: ReaderPanel(model: model))
-        // The split view item sizes this pane, as with the inspector.
-        host.sizingOptions = []
-        host.setFrameSize(NSSize(width: Theme.Size.inspectorWidth, height: Theme.Size.windowHeight))
-        view = host
-    }
-
-    /// Called as the tab comes forward: another PDF may have switched the
-    /// panel, and the inspector may have changed the note.
-    func willShow() {
-        model.mode = ReaderPanelModel.storedMode
-        model.note = store.note(itemId: itemId)
-    }
-}
-
+/// What a PDF's Annotations and Notes views in the sidebar show, and what
+/// they do.
 @MainActor
 final class ReaderPanelModel: ObservableObject {
-    enum Mode: Int {
-        case annotations
-        case notes
-    }
-
-    private static let modeKey = "readerPanelMode"
     private static let previewKey = "readerNotePreview"
 
-    static var storedMode: Mode {
-        Mode(rawValue: UserDefaults.standard.integer(forKey: modeKey)) ?? .annotations
-    }
-
-    @Published var mode: Mode = storedMode {
-        didSet { UserDefaults.standard.set(mode.rawValue, forKey: Self.modeKey) }
-    }
     /// The PDF's annotations in page order, top to bottom on each page.
     @Published var annotations: [Annotation] = []
     /// The card of the annotation last gone to.
@@ -64,7 +15,7 @@ final class ReaderPanelModel: ObservableObject {
     /// The card whose comment is being edited.
     @Published var editingId: String?
     @Published var note = ""
-    /// Whether the note shows rendered, shared like the mode.
+    /// Whether the note shows rendered, shared by every PDF.
     @Published var previewsNote = UserDefaults.standard.bool(forKey: previewKey) {
         didSet { UserDefaults.standard.set(previewsNote, forKey: Self.previewKey) }
     }
@@ -75,33 +26,9 @@ final class ReaderPanelModel: ObservableObject {
     var noteEdited: (String) -> Void = { _ in }
 }
 
-struct ReaderPanel: View {
-    @ObservedObject var model: ReaderPanelModel
-
-    var body: some View {
-        VStack(spacing: Theme.Size.gap) {
-            Picker("Panel", selection: $model.mode) {
-                Text("Annotations").tag(ReaderPanelModel.Mode.annotations)
-                Text("Notes").tag(ReaderPanelModel.Mode.notes)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, Theme.Size.padding)
-            .padding(.top, Theme.Size.gap)
-            switch model.mode {
-            case .annotations: AnnotationList(model: model)
-            case .notes: NotePanel(model: model)
-            }
-        }
-        // No background of its own: the panel sits on the window's chrome.
-        .frame(minWidth: Theme.Size.inspectorMinWidth, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .font(Theme.Font.swiftUIDefault)
-    }
-}
-
 // MARK: Annotations
 
-private struct AnnotationList: View {
+struct AnnotationList: View {
     @ObservedObject var model: ReaderPanelModel
 
     var body: some View {
@@ -122,7 +49,7 @@ private struct AnnotationList: View {
                         }
                     }
                     .padding(.horizontal, Theme.Size.padding)
-                    .padding(.bottom, Theme.Size.padding)
+                    .padding(.vertical, Theme.Size.gap)
                 }
                 // A highlight clicked on the page brings its card into view.
                 .onChange(of: model.selectedId) { _, id in
@@ -280,7 +207,7 @@ private struct AnnotationCardStyle: ButtonStyle {
 // MARK: Note
 
 /// The paper's note: a plain Markdown editor, or the note rendered.
-private struct NotePanel: View {
+struct NotePanel: View {
     @ObservedObject var model: ReaderPanelModel
     @Environment(\.displayScale) private var displayScale
 
@@ -291,6 +218,7 @@ private struct NotePanel: View {
                     .font(Theme.Font.swiftUISectionLabel)
                     .foregroundStyle(Theme.Color.swiftUITertiaryText)
                     .textCase(.uppercase)
+                    .lineLimit(1)
                 Spacer()
                 Button {
                     model.previewsNote.toggle()
@@ -299,6 +227,8 @@ private struct NotePanel: View {
                           systemImage: model.previewsNote ? Theme.Symbol.edit : Theme.Symbol.preview)
                 }
                 .buttonStyle(MarkupTextButtonStyle())
+                // The sidebar can be narrow; the label gives way first.
+                .fixedSize()
                 .keyboardShortcut("p", modifiers: [.command, .option])
                 .help(model.previewsNote ? "Edit the Markdown (⌥⌘P)" : "Show the note rendered (⌥⌘P)")
             }
@@ -317,6 +247,7 @@ private struct NotePanel: View {
             )
         }
         .padding(.horizontal, Theme.Size.padding)
+        .padding(.top, Theme.Size.gap)
         .padding(.bottom, Theme.Size.padding)
     }
 

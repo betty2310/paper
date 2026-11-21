@@ -1,62 +1,117 @@
 import AppKit
 import PDFKit
+import SwiftUI
 
-/// The sidebar while a PDF's tab is in front: a switch at the top between
-/// the PDF's table of contents and its pages. The choice is shared by every
-/// PDF and remembered across launches.
+/// The sidebar while a PDF's tab is in front. It shows one of four views,
+/// picked from the sidebar button's menu in the toolbar or from the View
+/// menu, as in Preview: the PDF's pages, its table of contents, its
+/// annotations as cards, or the paper's Markdown note. The choice is shared
+/// by every PDF and remembered across launches.
 @MainActor
 final class ReaderSidebarViewController: NSViewController {
-    enum Mode: Int {
+    /// The raw values are stored: Contents and Pages keep the values they had
+    /// before Annotations and Notes moved here from the detail panel.
+    enum Mode: Int, CaseIterable {
         case contents
         case pages
+        case annotations
+        case notes
+
+        /// Preview's order: pages first.
+        static let menuOrder: [Mode] = [.pages, .contents, .annotations, .notes]
+
+        var title: String {
+            switch self {
+            case .contents: "Contents"
+            case .pages: "Pages"
+            case .annotations: "Annotations"
+            case .notes: "Notes"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .contents: Theme.Symbol.contents
+            case .pages: Theme.Symbol.pages
+            case .annotations: Theme.Symbol.highlight
+            case .notes: Theme.Symbol.note
+            }
+        }
+
+        /// ⌥⌘2 to ⌥⌘5, after ⌥⌘1 for Hide Sidebar, as in Preview.
+        var keyEquivalent: String {
+            String((Self.menuOrder.firstIndex(of: self) ?? 0) + 2)
+        }
     }
 
     private static let modeKey = "readerSidebarMode"
 
-    let outline = ReaderOutlineViewController()
-    let pages = ReaderPagesViewController()
-    private let modeControl = NSSegmentedControl(labels: ["Contents", "Pages"], trackingMode: .selectOne, target: nil, action: nil)
-
-    private static var storedMode: Mode {
+    /// The view every PDF's sidebar shows.
+    static var mode: Mode {
         get { Mode(rawValue: UserDefaults.standard.integer(forKey: modeKey)) ?? .contents }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: modeKey) }
+    }
+
+    let outline = ReaderOutlineViewController()
+    let pages = ReaderPagesViewController()
+    /// What the Annotations and Notes views show, and what they do.
+    let panel = ReaderPanelModel()
+    private let store: LibraryStore
+    private let itemId: String
+    private lazy var annotations = Self.host(AnnotationList(model: panel))
+    private lazy var notes = Self.host(NotePanel(model: panel))
+
+    init(store: LibraryStore, itemId: String) {
+        self.store = store
+        self.itemId = itemId
+        super.init(nibName: nil, bundle: nil)
+        panel.noteEdited = { [weak store] markdown in
+            store?.scheduleNoteSave(itemId: itemId, markdown: markdown)
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    /// The split view item sizes the sidebar, so the SwiftUI views take the
+    /// width they get instead of asking for one.
+    private static func host(_ view: some View) -> NSView {
+        let host = NSHostingView(rootView: view
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .font(Theme.Font.swiftUIDefault))
+        host.sizingOptions = []
+        return host
     }
 
     override func loadView() {
         let root = NSView()
         addChild(outline)
         addChild(pages)
-
-        modeControl.segmentDistribution = .fillEqually
-        modeControl.target = self
-        modeControl.action = #selector(modeChanged(_:))
-        modeControl.setAccessibilityLabel("Sidebar content")
-
-        for subview in [modeControl, outline.view, pages.view] {
-            subview.translatesAutoresizingMaskIntoConstraints = false
-            root.addSubview(subview)
-        }
-        NSLayoutConstraint.activate([
-            modeControl.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: Theme.Size.gap),
-            modeControl.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Theme.Size.padding),
-            modeControl.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Theme.Size.padding),
-        ])
-        for content in [outline.view, pages.view] {
+        // The table of contents and the pages scroll under the toolbar. The
+        // SwiftUI views start below it: a hosting view that reached under it
+        // took clicks one toolbar height above where it drew.
+        let scrolling = [outline.view, pages.view]
+        for content in scrolling + [annotations, notes] {
+            content.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(content)
+            let top = scrolling.contains(content) ? root.topAnchor : root.safeAreaLayoutGuide.topAnchor
             NSLayoutConstraint.activate([
-                content.topAnchor.constraint(equalTo: modeControl.bottomAnchor, constant: Theme.Size.gap),
+                content.topAnchor.constraint(equalTo: top),
                 content.leadingAnchor.constraint(equalTo: root.leadingAnchor),
                 content.trailingAnchor.constraint(equalTo: root.trailingAnchor),
                 content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             ])
         }
         view = root
-        show(Self.storedMode)
+        show(Self.mode)
     }
 
-    /// Another PDF's sidebar may have switched while this one was away.
+    /// As the tab comes forward: another PDF may have switched the view, and
+    /// the inspector may have changed the note.
     override func viewWillAppear() {
         super.viewWillAppear()
-        show(Self.storedMode)
+        show(Self.mode)
+        panel.note = store.note(itemId: itemId)
     }
 
     func load(_ document: PDFDocument) {
@@ -71,27 +126,18 @@ final class ReaderSidebarViewController: NSViewController {
         pages.reveal(pageIndex)
     }
 
-    var showsPages: Bool { Self.storedMode == .pages }
-
-    /// ⌘2: between the table of contents and the pages.
-    func togglePages() {
+    /// Shows a view here, and in every other PDF's sidebar as its tab comes forward.
+    func set(_ mode: Mode) {
         _ = view
-        set(showsPages ? .contents : .pages)
-    }
-
-    @objc private func modeChanged(_ sender: NSSegmentedControl) {
-        set(Mode(rawValue: sender.selectedSegment) ?? .contents)
-    }
-
-    private func set(_ mode: Mode) {
-        Self.storedMode = mode
+        Self.mode = mode
         show(mode)
     }
 
     private func show(_ mode: Mode) {
-        modeControl.selectedSegment = mode.rawValue
         outline.view.isHidden = mode != .contents
         pages.view.isHidden = mode != .pages
+        annotations.isHidden = mode != .annotations
+        notes.isHidden = mode != .notes
         if mode == .pages { pages.scrollToCurrent() }
     }
 }

@@ -345,7 +345,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         sidebarItem.keyEquivalentModifierMask = [.command]
         let inspectorItem = viewMenu.addItem(withTitle: "Hide Inspector", action: #selector(MainWindowController.toggleInspector(_:)), keyEquivalent: "b")
         inspectorItem.keyEquivalentModifierMask = [.command, .shift]
-        viewMenu.addItem(withTitle: "Show Pages", action: #selector(MainWindowController.togglePages(_:)), keyEquivalent: "2")
+        // ⌥⌘1 hides the sidebar too, as in Preview; ⌘B is the one shown.
+        for item in MainWindowController.sidebarViewItems(target: nil) {
+            if item.action == #selector(MainWindowController.toggleSidebar(_:)) {
+                item.isHidden = true
+                item.allowsKeyEquivalentWhenHidden = true
+            }
+            viewMenu.addItem(item)
+        }
         viewMenu.addItem(.separator())
         viewMenu.addItem(withTitle: "Zoom In", action: #selector(MainWindowController.zoomIn(_:)), keyEquivalent: "+")
         viewMenu.addItem(withTitle: "Zoom Out", action: #selector(MainWindowController.zoomOut(_:)), keyEquivalent: "-")

@@ -16,7 +16,8 @@ enum Theme {
 
         static let sidebarWidth: CGFloat = 220
         static let sidebarMinWidth: CGFloat = 180
-        static let sidebarMaxWidth: CGFloat = 320
+        /// Room for annotation cards and the note in a PDF's sidebar.
+        static let sidebarMaxWidth: CGFloat = 400
         static let inspectorWidth: CGFloat = 340
         static let inspectorMinWidth: CGFloat = 280
         static let inspectorMaxWidth: CGFloat = 520
@@ -127,9 +128,14 @@ enum Theme {
         static let thumbnailOutlineWidth: CGFloat = 2
         static let thumbnailOutlineGap: CGFloat = 2
         static let thumbnailOutlineRadius: CGFloat = 4
-        /// The find bar's field, and room for "128 of 340" so it keeps its width.
-        static let findFieldWidth: CGFloat = 180
-        static let findCountWidth: CGFloat = 76
+        /// The find field in the reader's controls, with the match count
+        /// ("128 of 340") inside it.
+        static let findFieldWidth: CGFloat = 240
+        /// The blur under the toolbar is full over this fraction of the
+        /// toolbar's height from the top, then fades out to its bottom edge.
+        static let toolbarBlurSolid: CGFloat = 0.75
+        /// The fade's mask is drawn this tall and stretched to the toolbar.
+        static let toolbarFadeImageHeight: CGFloat = 64
         /// The reader's floating controls, over the top of the page.
         static let readerBarInset: CGFloat = 16
         static let readerBarButton: CGFloat = 28
@@ -233,12 +239,19 @@ enum Theme {
         /// per appearance: `withAlphaComponent` on a system color keeps the
         /// shade of the appearance it first ran in, so a palette first shown
         /// in Dark Mode stayed dark, and looked gray, in Light Mode.
-        static let paletteTint = NSColor(name: nil) { appearance in
-            var color = NSColor.windowBackgroundColor
-            appearance.performAsCurrentDrawingAppearance {
-                color = NSColor.windowBackgroundColor.usingColorSpace(.sRGB) ?? color
+        static let paletteTint = glassTint(Opacity.glassTint)
+        /// The reader's floating controls sit over dense page text, so their
+        /// glass is frosted more than the palette's.
+        static let floatingGlassTint = glassTint(Opacity.floatingGlassTint)
+
+        private static func glassTint(_ opacity: Double) -> NSColor {
+            NSColor(name: nil) { appearance in
+                var color = NSColor.windowBackgroundColor
+                appearance.performAsCurrentDrawingAppearance {
+                    color = NSColor.windowBackgroundColor.usingColorSpace(.sRGB) ?? color
+                }
+                return color.withAlphaComponent(opacity)
             }
-            return color.withAlphaComponent(Opacity.glassTint)
         }
     }
 
@@ -248,6 +261,7 @@ enum Theme {
         static let hoverTint: Double = 0.18
         static let pressedTint: Double = 0.24
         static let glassTint: Double = 0.6
+        static let floatingGlassTint: Double = 0.8
     }
 
     /// Paper titles use the title font, the system serif (New York) unless
@@ -544,6 +558,10 @@ enum Theme {
         static let addPaper = "plus"
         static let sort = "arrow.up.arrow.down"
         static let inspector = "sidebar.trailing"
+        /// The PDF tab's sidebar button and the views its menu picks.
+        static let sidebar = "sidebar.leading"
+        static let pages = "rectangle.portrait.on.rectangle.portrait"
+        static let contents = "list.bullet.indent"
         static let newCollection = "folder.badge.plus"
         static let pdf = "doc.richtext"
         static let failed = "exclamationmark.triangle.fill"

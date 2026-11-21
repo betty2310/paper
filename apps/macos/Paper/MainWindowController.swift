@@ -7,9 +7,10 @@ import SwiftUI
 /// view (sidebar, center, inspector). The toolbar, the sidebar, and the
 /// inspector share one translucent chrome, and the center sits on it too,
 /// showing the paper list or one of the open PDFs, chosen by the tabs in the
-/// toolbar. While a PDF is in front, the sidebar shows its table of contents
-/// instead of the library's lists, and the detail panel shows its annotations
-/// and the paper's note instead of the inspector. Commands are
+/// toolbar. While a PDF is in front, the sidebar shows its pages, table of
+/// contents, annotations, or note instead of the library's lists, picked
+/// from the sidebar button's menu as in Preview, and the detail panel is
+/// hidden: it belongs to the library. Commands are
 /// selectors on the responder chain so menu items, toolbar buttons, and
 /// SwiftUI buttons share one code path.
 @MainActor
@@ -21,7 +22,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private let sidebarContent: SidebarContentViewController
     let list: PaperListViewController
     let inspector: InspectorViewController
-    /// The detail panel: the inspector, or the panel of the PDF in front.
+    /// The detail panel, which shows the inspector in the library.
     private let detailContent: TabContentViewController
     private let center: TabContentViewController
     private let tabStrip = TabStripView()
@@ -33,6 +34,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     /// A paper the user asked to open while its PDF was still downloading.
     private var pendingOpen: String?
     private var inspectorItem: NSSplitViewItem!
+    /// Whether the user hid the inspector in the library. PDF tabs hide it,
+    /// and the library brings it back as it was.
+    private var libraryInspectorCollapsed = false
     private let searchPalette: SearchPaletteController
     private let addPopover = NSPopover()
     private var subscriptions: Set<AnyCancellable> = []
@@ -44,6 +48,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         static let inspector = NSToolbarItem.Identifier("inspector")
         static let tabs = NSToolbarItem.Identifier("tabs")
         static let title = NSToolbarItem.Identifier("title")
+        /// Replaces the system sidebar button while a PDF is in front.
+        static let readerSidebar = NSToolbarItem.Identifier("readerSidebar")
 
         /// What the toolbar shows between the title and the inspector button
         /// while the library is in front. The reader's controls float over
@@ -57,8 +63,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         sidebarContent = SidebarContentViewController(showing: sidebar)
         list = PaperListViewController(store: store)
         inspector = InspectorViewController(store: store)
-        detailContent = TabContentViewController(showing: inspector)
-        center = TabContentViewController(showing: list)
+        detailContent = TabContentViewController(showing: inspector, underToolbar: false)
+        center = TabContentViewController(showing: list, underToolbar: true)
         searchPalette = SearchPaletteController(store: store)
 
         let window = NSWindow(
@@ -201,6 +207,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         // showing them again brings back the width the user chose.
         splitViewController.splitViewItems[0].isCollapsed = settings.sidebarCollapsed
         inspectorItem.isCollapsed = settings.detailCollapsed
+        libraryInspectorCollapsed = settings.detailCollapsed
         // However a panel is hidden or shown (the toolbar buttons, the menu,
         // or dragging its divider shut), the choice is written at once.
         panelObservers = [splitViewController.splitViewItems[0], inspectorItem].map { item in
@@ -274,9 +281,21 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private func savePanelsShown() {
         var settings = store.settings
         settings.sidebarCollapsed = splitViewController.splitViewItems[0].isCollapsed
-        settings.detailCollapsed = inspectorItem.isCollapsed
+        settings.detailCollapsed = inspectorShownInLibrary ? inspectorItem.isCollapsed : libraryInspectorCollapsed
         guard settings != store.settings else { return }
         store.updateSettings(settings)
+    }
+
+    /// While a PDF is in front, the inspector is hidden by the tab, not by the user.
+    private var inspectorShownInLibrary: Bool { activeReader == nil }
+
+    /// Hides or shows the inspector with the panel animation.
+    private func setInspectorCollapsed(_ collapsed: Bool) {
+        guard inspectorItem.isCollapsed != collapsed else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Theme.Duration.panel
+            inspectorItem.animator().isCollapsed = collapsed
+        }
     }
 
     private func updateTitle(scope: Scope, count: Int) {
@@ -357,9 +376,17 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
     @objc func toggleInspector(_ sender: Any?) {
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = Theme.Duration.panel
-            inspectorItem.animator().isCollapsed.toggle()
+        guard activeReader == nil else { return }
+        setInspectorCollapsed(!inspectorItem.isCollapsed)
+    }
+
+    /// Shows one of the PDF sidebar's views (⌥⌘2 to ⌥⌘5), opening the
+    /// sidebar if it is hidden.
+    @objc func showSidebarView(_ sender: NSMenuItem) {
+        guard let reader = activeReader, let mode = ReaderSidebarViewController.Mode(rawValue: sender.tag) else { return }
+        reader.sidebar.set(mode)
+        if splitViewController.splitViewItems[0].isCollapsed {
+            splitViewController.toggleSidebar(sender)
         }
     }
 
@@ -396,13 +423,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             return true
         case #selector(toggleInspector(_:)):
             menuItem.title = inspectorItem.isCollapsed ? "Show Inspector" : "Hide Inspector"
-            return true
+            return activeReader == nil
         case #selector(newSubcollection(_:)):
             return sidebar.selectedCollectionId != nil
         case #selector(openSelectedPaper(_:)):
             return activeReader == nil && store.selectedItemIds.count == 1
-        case #selector(togglePages(_:)):
-            menuItem.title = activeReader?.sidebar.showsPages == true ? "Show Contents" : "Show Pages"
+        case #selector(showSidebarView(_:)):
+            menuItem.state = activeReader != nil && menuItem.tag == ReaderSidebarViewController.mode.rawValue ? .on : .off
             return activeReader != nil
         case #selector(zoomIn(_:)):
             return activeReader?.canZoomIn ?? false
@@ -537,7 +564,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         // So the inspector shows what was typed in the reader's note.
         store.reloadNote()
         center.show(list, animated: true)
-        detailContent.show(inspector, animated: true)
+        setInspectorCollapsed(libraryInspectorCollapsed)
         sidebarContent.show(sidebar, from: .reader)
         updateTabs()
         showLibraryToolbarItems(true)
@@ -547,11 +574,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private func activate(_ reader: ReaderViewController, landing: Bool = false) {
         guard activeReader !== reader else { return }
         activeReader?.savePosition()
+        if activeReader == nil {
+            libraryInspectorCollapsed = inspectorItem.isCollapsed
+        }
         sidebarContent.show(reader.sidebar, from: activeReader == nil ? .library : .reader)
         activeReader = reader
         center.show(reader, animated: true)
-        reader.panel.willShow()
-        detailContent.show(reader.panel, animated: true)
+        setInspectorCollapsed(true)
         updateTabs(landing: landing ? reader.itemId : nil)
         showLibraryToolbarItems(false)
         // The inspector follows the paper in front, when the list shows it.
@@ -580,7 +609,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             updateTabs()
         }
         center.remove(reader)
-        detailContent.remove(reader.panel)
         sidebarContent.remove(reader.sidebar)
     }
 
@@ -588,7 +616,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private func showLibraryAfterClosing() {
         store.reloadNote()
         center.show(list, animated: true)
-        detailContent.show(inspector, animated: true)
+        setInspectorCollapsed(libraryInspectorCollapsed)
         sidebarContent.show(sidebar, from: .reader)
         updateTabs()
         showLibraryToolbarItems(true)
@@ -652,7 +680,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     @objc func zoomToFitWidth(_ sender: Any?) { activeReader?.fitWidth() }
 
     /// Back to where the reader was before following a link (⌘[).
-    @objc func togglePages(_ sender: Any?) { activeReader?.sidebar.togglePages() }
     @objc func navigateBack(_ sender: Any?) { activeReader?.goBack() }
     @objc func navigateForward(_ sender: Any?) { activeReader?.goForward() }
 
@@ -698,16 +725,25 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         store.exportBibtex(itemIds: ids, name: name)
     }
 
-    /// The library's toolbar buttons show only while the library is in front.
+    /// The library's toolbar buttons and the inspector button show only
+    /// while the library is in front. A PDF tab has the sidebar button with
+    /// its menu of views instead of the plain one.
     private func showLibraryToolbarItems(_ show: Bool) {
         guard let toolbar = window?.toolbar else { return }
-        let shown = toolbar.items.contains { ToolbarID.library.contains($0.itemIdentifier) }
+        let sidebarButton = show ? NSToolbarItem.Identifier.toggleSidebar : ToolbarID.readerSidebar
+        if let first = toolbar.items.first, first.itemIdentifier != sidebarButton {
+            toolbar.removeItem(at: 0)
+            toolbar.insertItem(withItemIdentifier: sidebarButton, at: 0)
+        }
+        let libraryOnly = ToolbarID.library + [ToolbarID.inspector]
+        let shown = toolbar.items.contains { libraryOnly.contains($0.itemIdentifier) }
         if show, !shown, let start = toolbar.items.firstIndex(where: { $0.itemIdentifier == .inspectorTrackingSeparator }) {
             for (offset, identifier) in ToolbarID.library.enumerated() {
                 toolbar.insertItem(withItemIdentifier: identifier, at: start + offset)
             }
+            toolbar.insertItem(withItemIdentifier: ToolbarID.inspector, at: toolbar.items.count)
         } else if !show {
-            for index in toolbar.items.indices.reversed() where ToolbarID.library.contains(toolbar.items[index].itemIdentifier) {
+            for index in toolbar.items.indices.reversed() where libraryOnly.contains(toolbar.items[index].itemIdentifier) {
                 toolbar.removeItem(at: index)
             }
         }
@@ -721,7 +757,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        toolbarDefaultItemIdentifiers(toolbar) + [ToolbarID.tabs]
+        toolbarDefaultItemIdentifiers(toolbar) + [ToolbarID.tabs, ToolbarID.readerSidebar]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
@@ -767,6 +803,17 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             item.isBordered = false
             item.visibilityPriority = .high
             return item
+        case ToolbarID.readerSidebar:
+            // As in Preview: a click opens the menu, which hides the
+            // sidebar or picks what it shows.
+            let item = NSMenuToolbarItem(itemIdentifier: identifier)
+            item.label = "Sidebar"
+            item.toolTip = "Choose what the sidebar shows, or hide it"
+            item.image = NSImage(systemSymbolName: Theme.Symbol.sidebar, accessibilityDescription: "Sidebar")
+            item.menu = Self.makeSidebarViewsMenu(target: self)
+            item.showsIndicator = true
+            item.isBordered = true
+            return item
         case ToolbarID.inspector:
             let item = NSToolbarItem(itemIdentifier: identifier)
             item.label = "Inspector"
@@ -779,6 +826,29 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         default:
             return nil
         }
+    }
+
+    /// Hide Sidebar and the PDF sidebar's views with Preview's shortcuts,
+    /// for the toolbar button's menu and the View menu.
+    static func sidebarViewItems(target: AnyObject?) -> [NSMenuItem] {
+        let toggle = NSMenuItem(title: "Hide Sidebar", action: #selector(toggleSidebar(_:)), keyEquivalent: "1")
+        toggle.keyEquivalentModifierMask = [.command, .option]
+        let views = ReaderSidebarViewController.Mode.menuOrder.map { mode in
+            let item = NSMenuItem(title: mode.title, action: #selector(showSidebarView(_:)), keyEquivalent: mode.keyEquivalent)
+            item.keyEquivalentModifierMask = [.command, .option]
+            item.tag = mode.rawValue
+            item.image = NSImage(systemSymbolName: mode.symbol, accessibilityDescription: nil)
+            return item
+        }
+        let items = [toggle, .separator()] + views
+        for item in items where !item.isSeparatorItem { item.target = target }
+        return items
+    }
+
+    private static func makeSidebarViewsMenu(target: AnyObject) -> NSMenu {
+        let menu = NSMenu()
+        menu.items = sidebarViewItems(target: target)
+        return menu
     }
 
     func makeSortMenu() -> NSMenu {
@@ -816,7 +886,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         settings.sidebarWidth = sidebarItem.isCollapsed ? settings.sidebarWidth : sidebarContent.view.frame.width
         settings.detailWidth = inspectorItem.isCollapsed ? settings.detailWidth : detailContent.view.frame.width
         settings.sidebarCollapsed = sidebarItem.isCollapsed
-        settings.detailCollapsed = inspectorItem.isCollapsed
+        settings.detailCollapsed = inspectorShownInLibrary ? inspectorItem.isCollapsed : libraryInspectorCollapsed
         if let frame = window?.frame {
             settings.window = WindowState(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height)
         }
@@ -834,20 +904,24 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
 /// The center of the window: the paper list or one reader, cross faded when
 /// the tab changes. It sits on the window's chrome with no card of its own,
-/// from under the toolbar to the window's bottom edge and the panels beside it. Readers stay alive
-/// while their tab is open, so switching back keeps the page and zoom. The
-/// detail panel uses one too, for the inspector or a reader's panel. Both
-/// start below the toolbar: a SwiftUI panel that reached under it and kept
-/// clear with the safe area took clicks and hover one toolbar height above
-/// where it drew.
+/// from the window's top edge, under the translucent toolbar, to its bottom
+/// edge and the panels beside it. Readers stay alive while their tab is
+/// open, so switching back keeps the page and zoom. The detail panel uses
+/// one too, for the inspector, which starts below the toolbar: a SwiftUI
+/// panel that reached under it and kept clear with the safe area took clicks
+/// and hover one toolbar height above where it drew.
 @MainActor
 final class TabContentViewController: NSViewController {
     private(set) var current: NSViewController
     /// Holds the column in front; its layer runs the tab switch fade.
     private let content = NSView()
+    /// Whether the column reaches under the toolbar, so its content scrolls
+    /// beneath it and shows through it.
+    private let underToolbar: Bool
 
-    init(showing initial: NSViewController) {
+    init(showing initial: NSViewController, underToolbar: Bool) {
         current = initial
+        self.underToolbar = underToolbar
         super.init(nibName: nil, bundle: nil)
         addChild(initial)
     }
@@ -861,11 +935,22 @@ final class TabContentViewController: NSViewController {
         content.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(content)
         NSLayoutConstraint.activate([
-            content.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            content.topAnchor.constraint(equalTo: underToolbar ? root.topAnchor : root.safeAreaLayoutGuide.topAnchor),
             content.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             content.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
+        if underToolbar {
+            let blur = ToolbarBlurView()
+            blur.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(blur)
+            NSLayoutConstraint.activate([
+                blur.topAnchor.constraint(equalTo: root.topAnchor),
+                blur.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+                blur.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+                blur.bottomAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            ])
+        }
         view = root
         pin(current.view)
     }
@@ -902,6 +987,41 @@ final class TabContentViewController: NSViewController {
             subview.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
     }
+}
+
+/// Blurs what scrolls under the toolbar, the way the toolbar in Preview
+/// does: fully behind the toolbar's items, fading to clear at its bottom
+/// edge, so the content shows through as it comes up without its text
+/// getting in the way of the toolbar's. The title bar itself draws no
+/// background: the toolbar sits on the window's one chrome.
+final class ToolbarBlurView: NSVisualEffectView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        material = .titlebar
+        blendingMode = .withinWindow
+        state = .followsWindowActiveState
+        maskImage = Self.fade
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    /// Opaque over the top part, then fading out; stretched to the toolbar's height.
+    private static let fade: NSImage = {
+        let image = NSImage(size: NSSize(width: 1, height: Theme.Size.toolbarFadeImageHeight), flipped: true) { rect in
+            NSGradient(colorsAndLocations:
+                (.black, 0),
+                (.black, Theme.Size.toolbarBlurSolid),
+                (.clear, 1)
+            )?.draw(in: rect, angle: 90)
+            return true
+        }
+        image.resizingMode = .stretch
+        return image
+    }()
+
+    /// Clicks go through to the toolbar above and the content below.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 /// The sidebar column: the library's lists while the library is in front,

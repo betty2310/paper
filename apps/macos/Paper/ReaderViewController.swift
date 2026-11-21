@@ -14,9 +14,9 @@ import SwiftUI
 /// Following a link inside the PDF, such as a citation, remembers where the
 /// reader was, and Back returns there. Highlights and sticky notes are stored
 /// by the engine and drawn as `PDFAnnotation`s on the in-memory document.
-/// The PDF's outline is the table of contents in the sidebar, and ⌘F finds
-/// text with PDFKit's search, marking every match on the pages. The detail
-/// panel lists the annotations as cards and holds the paper's Markdown note.
+/// The sidebar shows the PDF's pages, its outline as a table of contents,
+/// the annotations as cards, or the paper's Markdown note. ⌘F finds text
+/// with PDFKit's search, marking every match on the pages.
 @MainActor
 final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPopoverDelegate {
     let store: LibraryStore
@@ -24,10 +24,9 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
     let attachmentId: String
     /// The paper's title, shown in the tab.
     let paperTitle: String
-    /// The table of contents and the pages, shown in the sidebar while this tab is in front.
-    let sidebar = ReaderSidebarViewController()
-    /// The annotations and the note, shown in the detail panel while this tab is in front.
-    let panel: ReaderPanelViewController
+    /// The pages, the table of contents, the annotations, and the note,
+    /// shown in the sidebar while this tab is in front.
+    let sidebar: ReaderSidebarViewController
 
     private let file: AttachmentFile
     private let pdfView = ReaderPDFView()
@@ -42,7 +41,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
     private var linkOrigin: PDFDestination?
     /// The controls floating over the top of the page.
     private let barModel = ReaderBarModel()
-    private lazy var readerBar = NSHostingView(rootView: ReaderBar(model: barModel))
+    private lazy var readerBar = NSHostingView(rootView: ReaderBar(model: barModel, find: findModel))
 
     /// The engine's annotations by id, and what PDFKit draws for each.
     private var annotations: [String: Annotation] = [:]
@@ -60,9 +59,11 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
     /// After Add Note, the next click on a page places it.
     private(set) var isPlacingNote = false
     private var noteEditor: (id: String, model: NoteEditorModel, popover: NSPopover)?
-    /// The find bar, which floats under the controls at the trailing edge while it is open.
+    /// The search, which opens in the floating controls.
     private let findModel = ReaderFindModel()
-    private lazy var findBar = NSHostingView(rootView: ReaderFindBar(model: findModel))
+    /// How wide the controls are with the search open and the zoom shown,
+    /// so a narrow reader can tell when they fit again.
+    private var fullFindBarWidth: CGFloat = 0
     /// The current search's matches in document order, as PDFKit finds them.
     private var matches: [PDFSelection] = []
     private var matchIndex: Int?
@@ -80,7 +81,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         self.file = file
         self.attachmentId = file.id
         self.paperTitle = paperTitle
-        panel = ReaderPanelViewController(store: store, itemId: itemId)
+        sidebar = ReaderSidebarViewController(store: store, itemId: itemId)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -123,6 +124,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         barModel.fitWidth = { [weak self] in self?.fitWidth() }
         barModel.highlight = { [weak self] in self?.highlightSelection() }
         findModel.changed = { [weak self] in self?.scheduleFind() }
+        findModel.open = { [weak self] in self?.showFind() }
         findModel.next = { [weak self] in self?.findNext() }
         findModel.previous = { [weak self] in self?.findPrevious() }
         findModel.close = { [weak self] in self?.closeFind() }
@@ -131,12 +133,12 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
             guard let page = self?.pdfView.document?.page(at: index) else { return }
             self?.go(to: PDFDestination(page: page, at: NSPoint(x: 0, y: kPDFDestinationUnspecifiedValue)))
         }
-        panel.model.select = { [weak self] id in self?.goToAnnotation(id) }
-        panel.model.saveComment = { [weak self] id, text in
+        sidebar.panel.select = { [weak self] id in self?.goToAnnotation(id) }
+        sidebar.panel.saveComment = { [weak self] id, text in
             guard let self, let annotation = annotations[id] else { return }
             update(id, patch: AnnotationPatch(color: nil, comment: text), actionName: annotation.kind == .note ? "Edit Note" : "Edit Comment")
         }
-        panel.model.delete = { [weak self] id in
+        sidebar.panel.delete = { [weak self] id in
             guard let self, let annotation = annotations[id] else { return }
             if case .highlight(id) = markupTarget { hideMarkupBar() }
             remove(id, actionName: annotation.kind == .note ? "Delete Note" : "Remove Highlight")
@@ -159,7 +161,8 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
             failureLabel.centerYAnchor.constraint(equalTo: root.centerYAnchor),
             readerBar.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             // The hosting view includes room for the capsule's shadow.
-            readerBar.topAnchor.constraint(equalTo: root.topAnchor, constant: Theme.Size.readerBarInset - Theme.Toast.shadowRadius - Theme.Toast.shadowY),
+            // The pages scroll under the toolbar; the controls float below it.
+            readerBar.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: Theme.Size.readerBarInset - Theme.Toast.shadowRadius - Theme.Toast.shadowY),
         ])
         view = root
     }
@@ -338,7 +341,39 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
 
     override func viewDidLayout() {
         super.viewDidLayout()
+        insetPagesBelowToolbar()
+        fitReaderBar()
         positionMarkupBar()
+    }
+
+    /// With the search open, the controls may be wider than the reader; then
+    /// the zoom controls step aside until there is room again.
+    private func fitReaderBar() {
+        guard findModel.isOpen else {
+            if barModel.hidesZoom { barModel.hidesZoom = false }
+            return
+        }
+        // The hosting view includes room for the capsule's shadow.
+        let shadow = Theme.Toast.shadowRadius + Theme.Toast.shadowY
+        let room = view.bounds.width - (Theme.Size.readerBarInset - shadow) * 2
+        if !barModel.hidesZoom { fullFindBarWidth = readerBar.fittingSize.width }
+        let hides = fullFindBarWidth > room
+        if barModel.hidesZoom != hides { barModel.hidesZoom = hides }
+    }
+
+    /// The pages scroll under the translucent toolbar, but the first one
+    /// starts below it. PDFView does not inset its scroll view itself.
+    private func insetPagesBelowToolbar() {
+        guard let scrollView = pdfView.documentView?.enclosingScrollView else { return }
+        let top = view.safeAreaInsets.top
+        guard scrollView.contentInsets.top != top else { return }
+        let atTop = scrollView.contentView.bounds.minY <= -scrollView.contentInsets.top
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentInsets.top = top
+        if atTop {
+            scrollView.contentView.scroll(to: NSPoint(x: scrollView.contentView.bounds.minX, y: -top))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
     }
 
     // MARK: Following links
@@ -429,7 +464,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         } else if let (page, point) = pageLocation(of: event, nearest: false),
                   let id = annotationId(of: .highlight, at: point, on: page) {
             showMarkupBar(for: .highlight(id))
-            panel.model.selectedId = id
+            sidebar.panel.selectedId = id
         }
     }
 
@@ -608,7 +643,9 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
     /// room above, and keeps it inside the reader.
     private func positionMarkupBar() {
         guard markupTarget != nil else { return }
-        let visible = view.convert(pdfView.bounds, from: pdfView)
+        var visible = view.convert(pdfView.bounds, from: pdfView)
+        // The pages run under the toolbar; the bar stays below it.
+        visible.size.height -= view.safeAreaInsets.top
         guard let anchor = markupAnchor(), anchor.intersects(visible) else {
             markupBar.removeFromSuperview()
             return
@@ -629,39 +666,27 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
 
     // MARK: Find
 
-    var hasFindMatches: Bool { findBar.superview != nil && !matches.isEmpty }
+    var hasFindMatches: Bool { findModel.isOpen && !matches.isEmpty }
 
-    /// Opens the find bar, or focuses its field again. Opening it with a one
-    /// line selection finds that text.
+    /// ⌘F: opens the search in the controls, or puts the keyboard in it
+    /// again. Opening it with a one line selection finds that text; otherwise
+    /// the last search comes back.
     func showFind() {
         guard pdfView.document != nil else { return }
-        if findBar.superview == nil, let text = selectedText?.string?.trimmingCharacters(in: .whitespacesAndNewlines), !text.contains(where: \.isNewline) {
-            findModel.query = text
-        }
-        if findBar.superview == nil {
-            // The hosting view includes room for the capsule's shadow.
-            let shadow = Theme.Toast.shadowRadius + Theme.Toast.shadowY
-            findBar.translatesAutoresizingMaskIntoConstraints = false
-            view.addSubview(findBar)
-            NSLayoutConstraint.activate([
-                // Under the controls, so the two never overlap in a narrow window.
-                findBar.topAnchor.constraint(equalTo: readerBar.bottomAnchor, constant: Theme.Size.gap - shadow * 2),
-                findBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: shadow - Theme.Size.readerBarInset),
-            ])
-            findBar.alphaValue = 0
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = Theme.Duration.panel
-                findBar.animator().alphaValue = 1
+        if !findModel.isOpen {
+            if let text = selectedText?.string?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty, !text.contains(where: \.isNewline) {
+                findModel.query = text
             }
+            findModel.setOpen(true)
             startFind()
         }
         // SwiftUI moves focus to the field only inside a hosting view that
-        // is already the first responder, and once it is in the window.
-        view.window?.makeFirstResponder(findBar)
+        // is already the first responder, and once the field is in the window.
+        view.window?.makeFirstResponder(readerBar)
         DispatchQueue.main.async { [weak self] in self?.findModel.focusRequest += 1 }
     }
 
-    /// Closes the find bar and clears the marks. The text stays for next time.
+    /// Closes the search and clears the marks. The text stays for next time.
     func closeFind() {
         findTimer?.invalidate()
         pdfView.document?.cancelFindString()
@@ -669,8 +694,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         matchIndex = nil
         pdfView.highlightedSelections = nil
         pdfView.clearSelection()
-        // Removed rather than hidden, so its buttons get fresh hover tracking.
-        findBar.removeFromSuperview()
+        findModel.setOpen(false)
         focus()
     }
 
@@ -684,6 +708,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
     }
 
     private func scheduleFind() {
+        guard findModel.isOpen else { return }
         findTimer?.invalidate()
         findTimer = Timer.scheduledTimer(withTimeInterval: Theme.Duration.findDelay, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.startFind() }
@@ -714,7 +739,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
     /// Counts the match, and goes to the first one at or after the page
     /// being read.
     private func found(_ match: PDFSelection) {
-        guard pendingFinds == 0, findBar.superview != nil, let document = pdfView.document else { return }
+        guard pendingFinds == 0, findModel.isActive, let document = pdfView.document else { return }
         match.color = Theme.Color.findMatch
         matches.append(match)
         findModel.matchCount = matches.count
@@ -725,7 +750,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
     }
 
     private func findEnded() {
-        guard pendingFinds == 0, findBar.superview != nil else { return }
+        guard pendingFinds == 0, findModel.isActive else { return }
         findModel.isSearching = false
         if matchIndex == nil, !matches.isEmpty {
             select(match: 0)
@@ -770,7 +795,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
             stopPlacingNote()
         } else if markupTarget != nil {
             hideMarkupBar()
-        } else if findBar.superview != nil {
+        } else if findModel.isOpen {
             closeFind()
         } else {
             super.cancelOperation(sender)
@@ -812,7 +837,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
             popover?.performClose(nil)
         }
         noteEditor = (id, model, popover)
-        panel.model.selectedId = id
+        sidebar.panel.selectedId = id
         popover.show(relativeTo: pdfView.convert(icon.bounds, from: page), of: pdfView, preferredEdge: .maxX)
     }
 
@@ -868,26 +893,26 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
     }
 
     /// Scrolls the annotation into view just below the floating controls,
-    /// from its card in the panel. Like a link, Back returns.
+    /// from its card in the sidebar. Like a link, Back returns.
     private func goToAnnotation(_ id: String) {
         guard let annotation = annotations[id], let page = pdfView.document?.page(at: Int(annotation.pageIndex)) else { return }
-        panel.model.selectedId = id
+        sidebar.panel.selectedId = id
         let rect = AnnotationGeometry.cgRect(annotation.rect)
         // View points, converted to page points at the current zoom.
         let clearOfBar = (Theme.Size.readerBarInset * 2 + Theme.Toast.height) / pdfView.scaleFactor
         go(to: PDFDestination(page: page, at: CGPoint(x: kPDFDestinationUnspecifiedValue, y: rect.maxY + clearOfBar)))
     }
 
-    /// The panel lists the annotations in page order, top to bottom on each
+    /// The sidebar lists the annotations in page order, top to bottom on each
     /// page, as they are read.
     private func annotationsChanged() {
-        panel.model.annotations = annotations.values.sorted { first, second in
+        sidebar.panel.annotations = annotations.values.sorted { first, second in
             if first.pageIndex != second.pageIndex { return first.pageIndex < second.pageIndex }
             let (a, b) = (AnnotationGeometry.cgRect(first.rect), AnnotationGeometry.cgRect(second.rect))
             if a.maxY != b.maxY { return a.maxY > b.maxY }
             return a.minX < b.minX
         }
-        if let id = panel.model.selectedId, annotations[id] == nil { panel.model.selectedId = nil }
+        if let id = sidebar.panel.selectedId, annotations[id] == nil { sidebar.panel.selectedId = nil }
     }
 
     private func draw(_ annotation: Annotation) {
