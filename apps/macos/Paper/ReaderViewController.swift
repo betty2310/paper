@@ -161,8 +161,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
             failureLabel.centerYAnchor.constraint(equalTo: root.centerYAnchor),
             readerBar.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             // The hosting view includes room for the capsule's shadow.
-            // The pages scroll under the toolbar; the controls float below it.
-            readerBar.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: Theme.Size.readerBarInset - Theme.Toast.shadowRadius - Theme.Toast.shadowY),
+            readerBar.topAnchor.constraint(equalTo: root.topAnchor, constant: Theme.Size.readerBarInset - Theme.Toast.shadowRadius - Theme.Toast.shadowY),
         ])
         view = root
     }
@@ -341,7 +340,6 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        insetPagesBelowToolbar()
         fitReaderBar()
         positionMarkupBar()
     }
@@ -359,21 +357,6 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         if !barModel.hidesZoom { fullFindBarWidth = readerBar.fittingSize.width }
         let hides = fullFindBarWidth > room
         if barModel.hidesZoom != hides { barModel.hidesZoom = hides }
-    }
-
-    /// The pages scroll under the translucent toolbar, but the first one
-    /// starts below it. PDFView does not inset its scroll view itself.
-    private func insetPagesBelowToolbar() {
-        guard let scrollView = pdfView.documentView?.enclosingScrollView else { return }
-        let top = view.safeAreaInsets.top
-        guard scrollView.contentInsets.top != top else { return }
-        let atTop = scrollView.contentView.bounds.minY <= -scrollView.contentInsets.top
-        scrollView.automaticallyAdjustsContentInsets = false
-        scrollView.contentInsets.top = top
-        if atTop {
-            scrollView.contentView.scroll(to: NSPoint(x: scrollView.contentView.bounds.minX, y: -top))
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-        }
     }
 
     // MARK: Following links
@@ -643,9 +626,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
     /// room above, and keeps it inside the reader.
     private func positionMarkupBar() {
         guard markupTarget != nil else { return }
-        var visible = view.convert(pdfView.bounds, from: pdfView)
-        // The pages run under the toolbar; the bar stays below it.
-        visible.size.height -= view.safeAreaInsets.top
+        let visible = view.convert(pdfView.bounds, from: pdfView)
         guard let anchor = markupAnchor(), anchor.intersects(visible) else {
             markupBar.removeFromSuperview()
             return

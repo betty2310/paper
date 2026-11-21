@@ -131,11 +131,6 @@ enum Theme {
         /// The find field in the reader's controls, with the match count
         /// ("128 of 340") inside it.
         static let findFieldWidth: CGFloat = 240
-        /// The blur under the toolbar is full over this fraction of the
-        /// toolbar's height from the top, then fades out to its bottom edge.
-        static let toolbarBlurSolid: CGFloat = 0.75
-        /// The fade's mask is drawn this tall and stretched to the toolbar.
-        static let toolbarFadeImageHeight: CGFloat = 64
         /// The reader's floating controls, over the top of the page.
         static let readerBarInset: CGFloat = 16
         static let readerBarButton: CGFloat = 28
@@ -240,8 +235,9 @@ enum Theme {
         /// shade of the appearance it first ran in, so a palette first shown
         /// in Dark Mode stayed dark, and looked gray, in Light Mode.
         static let paletteTint = glassTint(Opacity.glassTint)
-        /// The reader's floating controls sit over dense page text, so their
-        /// glass is frosted more than the palette's.
+        /// A light frost on the reader's floating controls, so their icons
+        /// stay readable over dense page text and the page still shows
+        /// through.
         static let floatingGlassTint = glassTint(Opacity.floatingGlassTint)
 
         private static func glassTint(_ opacity: Double) -> NSColor {
@@ -261,7 +257,7 @@ enum Theme {
         static let hoverTint: Double = 0.18
         static let pressedTint: Double = 0.24
         static let glassTint: Double = 0.6
-        static let floatingGlassTint: Double = 0.8
+        static let floatingGlassTint: Double = 0.25
     }
 
     /// Paper titles use the title font, the system serif (New York) unless
@@ -510,6 +506,30 @@ enum Theme {
     }
 
     /// The floating toasts in the window's bottom right corner.
+    /// Liquid Glass under the reader's floating controls. On a white page
+    /// clear glass shows almost nothing, so a bright rim, lit from above as
+    /// in Control Center, and a shadow outside the shape draw its edge.
+    enum Glass {
+        static let rim = LinearGradient(
+            stops: [
+                .init(color: SwiftUI.Color.white.opacity(0.85), location: 0),
+                .init(color: SwiftUI.Color.white.opacity(0.2), location: 0.5),
+                .init(color: SwiftUI.Color.white.opacity(0.55), location: 1),
+            ],
+            startPoint: .top, endPoint: .bottom)
+        static let rimWidth: CGFloat = 1
+        static let shadowColor = SwiftUI.Color.black.opacity(0.16)
+        static let shadowRadius: CGFloat = 6
+        static let shadowY: CGFloat = 2
+        /// A tight dark edge just outside the rim, so the glass has an
+        /// outline on white.
+        static let contactShadowColor = SwiftUI.Color.black.opacity(0.18)
+        static let contactShadowRadius: CGFloat = 0.5
+        static let contactShadowY: CGFloat = 0.5
+        /// How far outside the shape the shadow can reach.
+        static let shadowRoom: CGFloat = shadowRadius * 2 + shadowY
+    }
+
     enum Toast {
         static let height: CGFloat = 40
         static let cornerRadius: CGFloat = height / 2

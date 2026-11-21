@@ -66,8 +66,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         sidebarContent = SidebarContentViewController(showing: sidebar)
         list = PaperListViewController(store: store)
         inspector = InspectorViewController(store: store)
-        detailContent = TabContentViewController(showing: inspector, underToolbar: false)
-        center = TabContentViewController(showing: list, underToolbar: true)
+        detailContent = TabContentViewController(showing: inspector)
+        center = TabContentViewController(showing: list)
         searchPalette = SearchPaletteController(store: store)
 
         let window = NSWindow(
@@ -911,24 +911,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
 /// The center of the window: the paper list or one reader, cross faded when
 /// the tab changes. It sits on the window's chrome with no card of its own,
-/// from the window's top edge, under the translucent toolbar, to its bottom
-/// edge and the panels beside it. Readers stay alive while their tab is
-/// open, so switching back keeps the page and zoom. The detail panel uses
-/// one too, for the inspector, which starts below the toolbar: a SwiftUI
-/// panel that reached under it and kept clear with the safe area took clicks
-/// and hover one toolbar height above where it drew.
+/// from under the toolbar to the window's bottom edge and the panels beside it. Readers stay alive
+/// while their tab is open, so switching back keeps the page and zoom. The
+/// detail panel uses one too, for the inspector. Both start below the
+/// toolbar: a SwiftUI panel that reached under it and kept clear with the
+/// safe area took clicks and hover one toolbar height above where it drew.
 @MainActor
 final class TabContentViewController: NSViewController {
     private(set) var current: NSViewController
     /// Holds the column in front; its layer runs the tab switch fade.
     private let content = NSView()
-    /// Whether the column reaches under the toolbar, so its content scrolls
-    /// beneath it and shows through it.
-    private let underToolbar: Bool
 
-    init(showing initial: NSViewController, underToolbar: Bool) {
+    init(showing initial: NSViewController) {
         current = initial
-        self.underToolbar = underToolbar
         super.init(nibName: nil, bundle: nil)
         addChild(initial)
     }
@@ -942,22 +937,11 @@ final class TabContentViewController: NSViewController {
         content.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(content)
         NSLayoutConstraint.activate([
-            content.topAnchor.constraint(equalTo: underToolbar ? root.topAnchor : root.safeAreaLayoutGuide.topAnchor),
+            content.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
             content.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             content.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
-        if underToolbar {
-            let blur = ToolbarBlurView()
-            blur.translatesAutoresizingMaskIntoConstraints = false
-            root.addSubview(blur)
-            NSLayoutConstraint.activate([
-                blur.topAnchor.constraint(equalTo: root.topAnchor),
-                blur.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-                blur.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-                blur.bottomAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
-            ])
-        }
         view = root
         pin(current.view)
     }
@@ -994,41 +978,6 @@ final class TabContentViewController: NSViewController {
             subview.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
     }
-}
-
-/// Blurs what scrolls under the toolbar, the way the toolbar in Preview
-/// does: fully behind the toolbar's items, fading to clear at its bottom
-/// edge, so the content shows through as it comes up without its text
-/// getting in the way of the toolbar's. The title bar itself draws no
-/// background: the toolbar sits on the window's one chrome.
-final class ToolbarBlurView: NSVisualEffectView {
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        material = .titlebar
-        blendingMode = .withinWindow
-        state = .followsWindowActiveState
-        maskImage = Self.fade
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    /// Opaque over the top part, then fading out; stretched to the toolbar's height.
-    private static let fade: NSImage = {
-        let image = NSImage(size: NSSize(width: 1, height: Theme.Size.toolbarFadeImageHeight), flipped: true) { rect in
-            NSGradient(colorsAndLocations:
-                (.black, 0),
-                (.black, Theme.Size.toolbarBlurSolid),
-                (.clear, 1)
-            )?.draw(in: rect, angle: 90)
-            return true
-        }
-        image.resizingMode = .stretch
-        return image
-    }()
-
-    /// Clicks go through to the toolbar above and the content below.
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 /// The sidebar column: the library's lists while the library is in front,

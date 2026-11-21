@@ -371,13 +371,37 @@ struct FloatingGlass<S: InsettableShape, Fallback: View>: ViewModifier {
 
     func body(content: Content) -> some View {
         if #available(macOS 26, *) {
-            // Frosted, so the controls stay readable over dense text.
+            // Regular glass, not clear: in Dark Mode the clear glass's white
+            // icons vanished on a white page. A light frost keeps them
+            // readable over dense text.
             content
                 .background(SwiftUI.Color(nsColor: Theme.Color.floatingGlassTint), in: shape)
                 .glassEffect(.regular.interactive(), in: shape)
+                .overlay(shape.strokeBorder(Theme.Glass.rim, lineWidth: Theme.Glass.rimWidth).allowsHitTesting(false))
+                .background(GlassShadow(shape: shape))
         } else {
             fallback(AnyView(content), shape)
         }
+    }
+}
+
+/// The glass's shadow, drawn only outside its shape: a shadow on the glass
+/// itself would also fall on its icons, and a fill to cast it would show
+/// through the clear glass.
+private struct GlassShadow<S: InsettableShape>: View {
+    let shape: S
+
+    var body: some View {
+        shape.fill(SwiftUI.Color.black)
+            .shadow(color: Theme.Glass.shadowColor, radius: Theme.Glass.shadowRadius, y: Theme.Glass.shadowY)
+            .shadow(color: Theme.Glass.contactShadowColor, radius: Theme.Glass.contactShadowRadius, y: Theme.Glass.contactShadowY)
+            .mask {
+                Rectangle()
+                    .padding(-Theme.Glass.shadowRoom)
+                    .overlay(shape.fill(SwiftUI.Color.black).blendMode(.destinationOut))
+                    .compositingGroup()
+            }
+            .allowsHitTesting(false)
     }
 }
 

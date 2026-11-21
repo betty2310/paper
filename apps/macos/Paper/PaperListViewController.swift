@@ -83,9 +83,7 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
-        // The rows scroll under the translucent toolbar and the filter bar;
-        // `viewDidLayout` keeps the first row clear of both.
-        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.automaticallyAdjustsContentInsets = true
 
         emptyStateHost = NSHostingView(rootView: EmptyStateView(store: store))
         emptyStateHost.isHidden = true
@@ -104,10 +102,10 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
             root.addSubview(subview)
         }
         NSLayoutConstraint.activate([
-            filterHost.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            filterHost.topAnchor.constraint(equalTo: root.topAnchor),
             filterHost.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             filterHost.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: root.topAnchor),
+            scrollView.topAnchor.constraint(equalTo: filterHost.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
@@ -117,19 +115,6 @@ final class PaperListViewController: NSViewController, NSTableViewDataSource, NS
         ])
         root.addHighlight()
         view = root
-    }
-
-    override func viewDidLayout() {
-        super.viewDidLayout()
-        let top = view.safeAreaInsets.top + filterHost.frame.height
-        guard scrollView.contentInsets.top != top else { return }
-        // A list scrolled to its top stays there as the filter bar comes and goes.
-        let atTop = scrollView.contentView.bounds.minY <= -scrollView.contentInsets.top
-        scrollView.contentInsets.top = top
-        if atTop {
-            scrollView.contentView.scroll(to: NSPoint(x: 0, y: -top))
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-        }
     }
 
     override func viewDidLoad() {
@@ -831,7 +816,7 @@ final class PdfDropView: NSView {
         highlight.isHidden = true
         addSubview(highlight)
         NSLayoutConstraint.activate([
-            highlight.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor),
+            highlight.topAnchor.constraint(equalTo: topAnchor),
             highlight.leadingAnchor.constraint(equalTo: leadingAnchor),
             highlight.trailingAnchor.constraint(equalTo: trailingAnchor),
             highlight.bottomAnchor.constraint(equalTo: bottomAnchor),
