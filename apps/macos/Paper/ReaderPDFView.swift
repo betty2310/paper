@@ -14,6 +14,9 @@ protocol ReaderPDFViewDelegate: AnyObject {
     func readerView(_ view: ReaderPDFView, menuItemsFor event: NSEvent) -> [NSMenuItem]
     /// The mouse's back (-1) or forward (1) button.
     func readerView(_ view: ReaderPDFView, navigate step: Int)
+    /// The pointer moved over the pages, or left them.
+    func readerView(_ view: ReaderPDFView, mouseMoved event: NSEvent)
+    func readerViewMouseExited(_ view: ReaderPDFView)
     /// Whether the pointer should be a crosshair for placing a note.
     var isPlacingNote: Bool { get }
 }
@@ -25,6 +28,21 @@ final class ReaderPDFView: PDFView {
 
     /// A click the reader has not seen the end of yet.
     private var clickPending = false
+    /// Tells the reader when the pointer leaves the pages.
+    private var exitTracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let exitTracking { removeTrackingArea(exitTracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        exitTracking = area
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        if event.trackingArea == exitTracking { readerDelegate?.readerViewMouseExited(self) }
+    }
 
     override func mouseDown(with event: NSEvent) {
         if readerDelegate?.readerView(self, mouseDown: event) == true { return }
@@ -49,6 +67,7 @@ final class ReaderPDFView: PDFView {
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
         if readerDelegate?.isPlacingNote == true { NSCursor.crosshair.set() }
+        readerDelegate?.readerView(self, mouseMoved: event)
     }
 
     override func otherMouseUp(with event: NSEvent) {

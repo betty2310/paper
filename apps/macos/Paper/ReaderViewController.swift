@@ -53,6 +53,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
     /// What the floating toolbar is showing for, if it shows.
     private var markupTarget: MarkupTarget?
     private let markupModel = MarkupBarModel()
+    private var references: ReaderReferences?
     private lazy var markupBar = NSHostingView(rootView: MarkupBar(model: markupModel))
     /// The color the last highlight used, for ⇧⌘H.
     private static var lastHighlightColor = Theme.Markup.swatches[0].hex
@@ -164,6 +165,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
             readerBar.topAnchor.constraint(equalTo: root.topAnchor, constant: Theme.Size.readerBarInset - Theme.Toast.shadowRadius - Theme.Toast.shadowY),
         ])
         view = root
+        references = ReaderReferences(store: store, attachmentId: attachmentId, pdfView: pdfView, container: root)
     }
 
     /// Opens the document off the main actor and returns once the view has
@@ -220,6 +222,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
                     self?.pageChanged()
                     self?.updateBar()
                     self?.positionMarkupBar()
+                    self?.references?.reposition()
                 }
             },
             NotificationCenter.default.addObserver(forName: .PDFViewSelectionChanged, object: pdfView, queue: .main) { [weak self] _ in
@@ -242,10 +245,12 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
             observers.append(NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: clipView, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.positionMarkupBar()
+                    self?.references?.reposition()
                     self?.updateOutline()
                 }
             })
         }
+        references?.load()
         updateBar()
         readerBar.isHidden = false
         // Opening counts as reading: the paper leaves the Unread list now.
@@ -332,6 +337,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         findTimer?.invalidate()
         pdfView.document?.cancelFindString()
         finishEditingNote()
+        references?.close()
         savePosition()
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
@@ -342,6 +348,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         super.viewDidLayout()
         fitReaderBar()
         positionMarkupBar()
+        references?.reposition()
     }
 
     /// With the search open, the controls may be wider than the reader; then
@@ -430,6 +437,7 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
             editNote(id)
             return true
         }
+        if references?.mouseDown(event) == true { return true }
         if page.annotations.contains(where: { $0.bounds.contains(point) && Self.isInternalLink($0) }) {
             linkOrigin = pdfView.currentDestination
         }
@@ -451,6 +459,16 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         }
     }
 
+    func readerView(_ view: ReaderPDFView, mouseMoved event: NSEvent) {
+        // No card over a selection's toolbar or while placing a note.
+        guard !isPlacingNote, markupTarget == nil else { return }
+        references?.pointerMoved(event)
+    }
+
+    func readerViewMouseExited(_ view: ReaderPDFView) {
+        references?.pointerExited()
+    }
+
     func readerView(_ view: ReaderPDFView, navigate step: Int) {
         if step < 0 { goBack() } else { goForward() }
     }
@@ -459,6 +477,18 @@ final class ReaderViewController: NSViewController, ReaderPDFViewDelegate, NSPop
         var items: [NSMenuItem] = []
         if selectedText != nil {
             items.append(MenuAction("Highlight") { [weak self] in self?.highlightSelection() })
+        }
+        let reference = references?.reference(at: event)
+        // The menu takes the card's place.
+        references?.hide()
+        if let reference {
+            let link = ReferenceLink(reference)
+            items.append(MenuAction(link.kind == .search ? "Search Scholar for Reference" : "Open Cited Paper") { [weak self] in
+                self?.references?.open(reference)
+            })
+            items.append(MenuAction(link.kind == .search ? "Copy Reference" : "Copy Link to Cited Paper") { [weak self] in
+                self?.references?.copyLink(reference)
+            })
         }
         guard let (page, point) = pageLocation(of: event, nearest: false) else { return items }
         if let id = annotationId(of: .note, at: point, on: page) {

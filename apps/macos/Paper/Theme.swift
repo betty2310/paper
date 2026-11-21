@@ -156,6 +156,20 @@ enum Theme {
         static let markupButtonHeight: CGFloat = 24
         static let markupButtonPadding: CGFloat = 8
         /// A sticky note's icon on the page, in PDF points.
+        // The card that shows what a citation or a references entry cites.
+        static let referenceCardWidth: CGFloat = 340
+        static let referenceCardPadding: CGFloat = 12
+        static let referenceCardRadius: CGFloat = 10
+        static let referenceBadgeHeight: CGFloat = 18
+        static let referenceBadgePadding: CGFloat = 6
+        static let referenceTitleLines = 3
+        static let referenceTextLines = 4
+        /// Space between the card and the citation it belongs to.
+        static let referenceCardOffset: CGFloat = 6
+        /// How far the tint behind a hovered citation or entry reaches past
+        /// its text, and its corners.
+        static let referenceTintOutset: CGFloat = 2
+        static let referenceTintRadius: CGFloat = 3
         static let noteIconSize: CGFloat = 20
         static let noteEditorWidth: CGFloat = 280
         static let noteEditorHeight: CGFloat = 120
@@ -214,6 +228,8 @@ enum Theme {
         static let thumbnailPressedBorder = NSColor.labelColor.withAlphaComponent(0.5)
         /// Find matches on the page; the current one is the selection.
         static let findMatch = NSColor.findHighlightColor
+        static let referenceTint = NSColor.controlAccentColor.withAlphaComponent(Opacity.tint)
+        static let swiftUIReferenceBadge = SwiftUI.Color(nsColor: NSColor.labelColor.withAlphaComponent(0.08))
         static let swiftUIReaderBackground = SwiftUI.Color(nsColor: readerBackground)
         /// Toasts: an opaque capsule, white in Light Mode, with a gray close button.
         static let swiftUIToastBackground = SwiftUI.Color(nsColor: .controlBackgroundColor)
@@ -310,6 +326,7 @@ enum Theme {
         static var swiftUIToastAction: SwiftUI.Font { swiftUIInterface(size: 12, weight: .semibold) }
         static let swiftUIToastClose = SwiftUI.Font.system(size: 10, weight: .bold)
         static let swiftUIReaderBarIcon = SwiftUI.Font.system(size: 13, weight: .medium)
+        static var swiftUIReferenceTitle: SwiftUI.Font { swiftUITitle(size: 15, weight: .semibold) }
         static var swiftUIReaderBarLabel: SwiftUI.Font { swiftUIInterface(size: 12, weight: .medium).monospacedDigit() }
         static let swiftUIDropIcon = SwiftUI.Font.system(size: 28, weight: .light)
         static var swiftUIWelcomeTitle: SwiftUI.Font { swiftUITitle(size: 28, weight: .semibold) }
@@ -404,6 +421,15 @@ enum Theme {
         static let findDelay: TimeInterval = 0.15
         /// Page turns to wait before the reading position is saved.
         static let readingPositionSave: TimeInterval = 1
+        /// How long the pointer rests on a citation before its card shows,
+        /// so the card does not flash while the pointer crosses the text.
+        static let referenceHover: TimeInterval = 0.35
+        /// From one citation's card to the next one's, once a card is open.
+        static let referenceSwitch: TimeInterval = 0.1
+        /// How long the card stays after the pointer leaves, so it can travel
+        /// from the citation to the card.
+        static let referenceLinger: TimeInterval = 0.3
+        static let copiedFeedback: TimeInterval = 1.2
     }
 
     /// A named color stored by hex in the library.
@@ -620,6 +646,9 @@ enum Theme {
         static let taskDone = "checkmark.square.fill"
         static let favorite = "star"
         static let favoriteOn = "star.fill"
+        static let openLink = "arrow.up.right"
+        static let inLibrary = "checkmark.circle.fill"
+        static let copied = "checkmark"
         static let generalSettings = "gearshape"
         static let appearanceSettings = "paintbrush"
     }
