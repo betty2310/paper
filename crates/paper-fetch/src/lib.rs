@@ -14,6 +14,9 @@
 //!
 //! `Resolver::openalex_work` and `Resolver::choose_topics` pick a paper's
 //! automatic tags from the library's topic list.
+//!
+//! `Resolver::openalex_cited_work` reads the works a paper cites, to give
+//! the entries of its reference list an identifier.
 
 mod crossref;
 mod csl;
@@ -21,17 +24,22 @@ mod http;
 mod identify;
 mod pdf;
 mod rate_limit;
+mod references;
 mod resolver;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 mod text;
 mod topics;
 
+pub use crossref::SOURCE as CROSSREF;
 pub use http::{Contact, HttpClient, Response, USER_AGENT_PRODUCT, UreqClient};
 pub use identify::{
     CROSSREF_SEARCH, MESSAGES_URL, MODEL, MODEL_SOURCE, PageReading, TitleMatch, TitleSearch,
 };
-pub use pdf::{FoundPdf, PdfQuery, PdfSearch, is_pdf, openalex_work_url};
+pub use pdf::{FoundPdf, OPENALEX, PdfQuery, PdfSearch, is_pdf, openalex_work_url};
+pub use references::{
+    CitedWork, OPENALEX_REFERENCES, cited_work, openalex_cited_work_url, referenced_work_ids,
+};
 pub use resolver::{Lookup, Resolver};
 pub use topics::{
     JEV_MODEL, JEV_SOURCE, MAX_TOPICS, MIN_PROBABILITY, OpenAlexWork, PaperText, SYSTEM_ONE_URL,

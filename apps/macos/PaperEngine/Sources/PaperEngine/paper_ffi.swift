@@ -726,13 +726,19 @@ public protocol EngineProtocol: AnyObject, Sendable {
     
     func recentLibraries()  -> [String]
     
+    func references(attachmentId: String) async throws  -> References?
+    
     func removeFromCollection(collectionId: String, itemIds: [String]) throws 
     
     func renameCollection(id: String, name: String) throws 
     
+    func resolveReferences(attachmentId: String) async throws  -> References?
+    
     func retryLookup(itemId: String) async throws  -> ItemRow
     
     func saveNote(itemId: String, markdown: String) throws 
+    
+    func searchReference(attachmentId: String, index: UInt32) async throws  -> Reference
     
     func setFavorite(itemIds: [String], favorite: Bool) throws 
     
@@ -1177,6 +1183,22 @@ open func recentLibraries() -> [String]  {
 })
 }
     
+open func references(attachmentId: String)async throws  -> References?  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_paper_ffi_fn_method_engine_references(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(attachmentId)
+                )
+            },
+            pollFunc: ffi_paper_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_paper_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_paper_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionTypeReferences.lift,
+            errorHandler: FfiConverterTypePaperError_lift
+        )
+}
+    
 open func removeFromCollection(collectionId: String, itemIds: [String])throws   {try rustCallWithError(FfiConverterTypePaperError_lift) {
         uniffiCallStatus in
     uniffi_paper_ffi_fn_method_engine_remove_from_collection(
@@ -1195,6 +1217,22 @@ open func renameCollection(id: String, name: String)throws   {try rustCallWithEr
         FfiConverterString.lower(name),uniffiCallStatus
     )
 }
+}
+    
+open func resolveReferences(attachmentId: String)async throws  -> References?  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_paper_ffi_fn_method_engine_resolve_references(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(attachmentId)
+                )
+            },
+            pollFunc: ffi_paper_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_paper_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_paper_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionTypeReferences.lift,
+            errorHandler: FfiConverterTypePaperError_lift
+        )
 }
     
 open func retryLookup(itemId: String)async throws  -> ItemRow  {
@@ -1221,6 +1259,22 @@ open func saveNote(itemId: String, markdown: String)throws   {try rustCallWithEr
         FfiConverterString.lower(markdown),uniffiCallStatus
     )
 }
+}
+    
+open func searchReference(attachmentId: String, index: UInt32)async throws  -> Reference  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_paper_ffi_fn_method_engine_search_reference(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(attachmentId),FfiConverterUInt32.lower(index)
+                )
+            },
+            pollFunc: ffi_paper_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_paper_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_paper_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeReference_lift,
+            errorHandler: FfiConverterTypePaperError_lift
+        )
 }
     
 open func setFavorite(itemIds: [String], favorite: Bool)throws   {try rustCallWithError(FfiConverterTypePaperError_lift) {
@@ -2193,6 +2247,64 @@ public func FfiConverterTypeCitation_lift(_ buf: RustBuffer) throws -> Citation 
 #endif
 public func FfiConverterTypeCitation_lower(_ value: Citation) -> RustBuffer {
     return FfiConverterTypeCitation.lower(value)
+}
+
+
+public struct CitationLink: Equatable, Hashable {
+    public var pageIndex: Int32
+    public var rect: PageRect
+    public var reference: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(pageIndex: Int32, rect: PageRect, reference: UInt32) {
+        self.pageIndex = pageIndex
+        self.rect = rect
+        self.reference = reference
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension CitationLink: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCitationLink: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CitationLink {
+        return
+            try CitationLink(
+                pageIndex: FfiConverterInt32.read(from: &buf), 
+                rect: FfiConverterTypePageRect.read(from: &buf), 
+                reference: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: CitationLink, into buf: inout [UInt8]) {
+        FfiConverterInt32.write(value.pageIndex, into: &buf)
+        FfiConverterTypePageRect.write(value.rect, into: &buf)
+        FfiConverterUInt32.write(value.reference, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCitationLink_lift(_ buf: RustBuffer) throws -> CitationLink {
+    return try FfiConverterTypeCitationLink.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCitationLink_lower(_ value: CitationLink) -> RustBuffer {
+    return FfiConverterTypeCitationLink.lower(value)
 }
 
 
@@ -3333,6 +3445,204 @@ public func FfiConverterTypeReaderTabs_lift(_ buf: RustBuffer) throws -> ReaderT
 #endif
 public func FfiConverterTypeReaderTabs_lower(_ value: ReaderTabs) -> RustBuffer {
     return FfiConverterTypeReaderTabs.lower(value)
+}
+
+
+public struct Reference: Equatable, Hashable {
+    public var index: UInt32
+    public var number: UInt32?
+    public var text: String
+    public var parts: [ReferencePart]
+    public var doi: String?
+    public var arxivId: String?
+    public var url: String?
+    public var title: String?
+    public var year: Int32?
+    public var foundBy: ReferenceSource
+    public var itemId: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(index: UInt32, number: UInt32?, text: String, parts: [ReferencePart], doi: String?, arxivId: String?, url: String?, title: String?, year: Int32?, foundBy: ReferenceSource, itemId: String?) {
+        self.index = index
+        self.number = number
+        self.text = text
+        self.parts = parts
+        self.doi = doi
+        self.arxivId = arxivId
+        self.url = url
+        self.title = title
+        self.year = year
+        self.foundBy = foundBy
+        self.itemId = itemId
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension Reference: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeReference: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Reference {
+        return
+            try Reference(
+                index: FfiConverterUInt32.read(from: &buf), 
+                number: FfiConverterOptionUInt32.read(from: &buf), 
+                text: FfiConverterString.read(from: &buf), 
+                parts: FfiConverterSequenceTypeReferencePart.read(from: &buf), 
+                doi: FfiConverterOptionString.read(from: &buf), 
+                arxivId: FfiConverterOptionString.read(from: &buf), 
+                url: FfiConverterOptionString.read(from: &buf), 
+                title: FfiConverterOptionString.read(from: &buf), 
+                year: FfiConverterOptionInt32.read(from: &buf), 
+                foundBy: FfiConverterTypeReferenceSource.read(from: &buf), 
+                itemId: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Reference, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.index, into: &buf)
+        FfiConverterOptionUInt32.write(value.number, into: &buf)
+        FfiConverterString.write(value.text, into: &buf)
+        FfiConverterSequenceTypeReferencePart.write(value.parts, into: &buf)
+        FfiConverterOptionString.write(value.doi, into: &buf)
+        FfiConverterOptionString.write(value.arxivId, into: &buf)
+        FfiConverterOptionString.write(value.url, into: &buf)
+        FfiConverterOptionString.write(value.title, into: &buf)
+        FfiConverterOptionInt32.write(value.year, into: &buf)
+        FfiConverterTypeReferenceSource.write(value.foundBy, into: &buf)
+        FfiConverterOptionString.write(value.itemId, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeReference_lift(_ buf: RustBuffer) throws -> Reference {
+    return try FfiConverterTypeReference.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeReference_lower(_ value: Reference) -> RustBuffer {
+    return FfiConverterTypeReference.lower(value)
+}
+
+
+public struct ReferencePart: Equatable, Hashable {
+    public var pageIndex: Int32
+    public var rect: PageRect
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(pageIndex: Int32, rect: PageRect) {
+        self.pageIndex = pageIndex
+        self.rect = rect
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ReferencePart: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeReferencePart: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ReferencePart {
+        return
+            try ReferencePart(
+                pageIndex: FfiConverterInt32.read(from: &buf), 
+                rect: FfiConverterTypePageRect.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ReferencePart, into buf: inout [UInt8]) {
+        FfiConverterInt32.write(value.pageIndex, into: &buf)
+        FfiConverterTypePageRect.write(value.rect, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeReferencePart_lift(_ buf: RustBuffer) throws -> ReferencePart {
+    return try FfiConverterTypeReferencePart.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeReferencePart_lower(_ value: ReferencePart) -> RustBuffer {
+    return FfiConverterTypeReferencePart.lower(value)
+}
+
+
+public struct References: Equatable, Hashable {
+    public var references: [Reference]
+    public var citations: [CitationLink]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(references: [Reference], citations: [CitationLink]) {
+        self.references = references
+        self.citations = citations
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension References: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeReferences: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> References {
+        return
+            try References(
+                references: FfiConverterSequenceTypeReference.read(from: &buf), 
+                citations: FfiConverterSequenceTypeCitationLink.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: References, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeReference.write(value.references, into: &buf)
+        FfiConverterSequenceTypeCitationLink.write(value.citations, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeReferences_lift(_ buf: RustBuffer) throws -> References {
+    return try FfiConverterTypeReferences.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeReferences_lower(_ value: References) -> RustBuffer {
+    return FfiConverterTypeReferences.lower(value)
 }
 
 
@@ -4504,6 +4814,93 @@ public func FfiConverterTypePdfStep_lower(_ value: PdfStep) -> RustBuffer {
 
 
 
+public enum ReferenceSource: Equatable, Hashable {
+    
+    case deposited
+    case printed
+    case openAlex
+    case search
+    case unresolved
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ReferenceSource: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeReferenceSource: FfiConverterRustBuffer {
+    typealias SwiftType = ReferenceSource
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ReferenceSource {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .deposited
+        
+        case 2: return .printed
+        
+        case 3: return .openAlex
+        
+        case 4: return .search
+        
+        case 5: return .unresolved
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ReferenceSource, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .deposited:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .printed:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .openAlex:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .search:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .unresolved:
+            writeInt(&buf, Int32(5))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeReferenceSource_lift(_ buf: RustBuffer) throws -> ReferenceSource {
+    return try FfiConverterTypeReferenceSource.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeReferenceSource_lower(_ value: ReferenceSource) -> RustBuffer {
+    return FfiConverterTypeReferenceSource.lower(value)
+}
+
+
+
+
 public enum Scope: Equatable, Hashable {
     
     case all
@@ -4692,6 +5089,30 @@ public func FfiConverterTypeSortColumn_lower(_ value: SortColumn) -> RustBuffer 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
+    typealias SwiftType = UInt32?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt32.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt32.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionInt32: FfiConverterRustBuffer {
     typealias SwiftType = Int32?
 
@@ -4852,6 +5273,30 @@ fileprivate struct FfiConverterOptionTypeReaderTabs: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeReaderTabs.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeReferences: FfiConverterRustBuffer {
+    typealias SwiftType = References?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeReferences.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeReferences.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -5031,6 +5476,31 @@ fileprivate struct FfiConverterSequenceTypeAttachmentRow: FfiConverterRustBuffer
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeCitationLink: FfiConverterRustBuffer {
+    typealias SwiftType = [CitationLink]
+
+    public static func write(_ value: [CitationLink], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeCitationLink.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [CitationLink] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [CitationLink]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeCitationLink.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeCollectionNode: FfiConverterRustBuffer {
     typealias SwiftType = [CollectionNode]
 
@@ -5148,6 +5618,56 @@ fileprivate struct FfiConverterSequenceTypeQuad: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeQuad.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeReference: FfiConverterRustBuffer {
+    typealias SwiftType = [Reference]
+
+    public static func write(_ value: [Reference], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeReference.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Reference] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Reference]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeReference.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeReferencePart: FfiConverterRustBuffer {
+    typealias SwiftType = [ReferencePart]
+
+    public static func write(_ value: [ReferencePart], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeReferencePart.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ReferencePart] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [ReferencePart]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeReferencePart.read(from: &buf))
         }
         return seq
     }
@@ -5435,16 +5955,25 @@ private let initializationResult: InitializationResult = {
     if (uniffi_paper_ffi_checksum_method_engine_recent_libraries() != 31624) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_paper_ffi_checksum_method_engine_references() != 62800) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_paper_ffi_checksum_method_engine_remove_from_collection() != 61148) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_rename_collection() != 60457) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_paper_ffi_checksum_method_engine_resolve_references() != 23079) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_paper_ffi_checksum_method_engine_retry_lookup() != 6509) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_save_note() != 46797) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paper_ffi_checksum_method_engine_search_reference() != 30478) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_set_favorite() != 61757) {

@@ -477,6 +477,11 @@ RustBuffer uniffi_paper_ffi_fn_method_engine_reader_tabs(uint64_t ptr, RustCallS
 RustBuffer uniffi_paper_ffi_fn_method_engine_recent_libraries(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_REFERENCES
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_REFERENCES
+uint64_t uniffi_paper_ffi_fn_method_engine_references(uint64_t ptr, RustBuffer attachment_id
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_REMOVE_FROM_COLLECTION
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_REMOVE_FROM_COLLECTION
 void uniffi_paper_ffi_fn_method_engine_remove_from_collection(uint64_t ptr, RustBuffer collection_id, RustBuffer item_ids, RustCallStatus *_Nonnull out_status
@@ -487,6 +492,11 @@ void uniffi_paper_ffi_fn_method_engine_remove_from_collection(uint64_t ptr, Rust
 void uniffi_paper_ffi_fn_method_engine_rename_collection(uint64_t ptr, RustBuffer id, RustBuffer name, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_RESOLVE_REFERENCES
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_RESOLVE_REFERENCES
+uint64_t uniffi_paper_ffi_fn_method_engine_resolve_references(uint64_t ptr, RustBuffer attachment_id
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_RETRY_LOOKUP
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_RETRY_LOOKUP
 uint64_t uniffi_paper_ffi_fn_method_engine_retry_lookup(uint64_t ptr, RustBuffer item_id
@@ -495,6 +505,11 @@ uint64_t uniffi_paper_ffi_fn_method_engine_retry_lookup(uint64_t ptr, RustBuffer
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SAVE_NOTE
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SAVE_NOTE
 void uniffi_paper_ffi_fn_method_engine_save_note(uint64_t ptr, RustBuffer item_id, RustBuffer markdown, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SEARCH_REFERENCE
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SEARCH_REFERENCE
+uint64_t uniffi_paper_ffi_fn_method_engine_search_reference(uint64_t ptr, RustBuffer attachment_id, uint32_t index
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SET_FAVORITE
@@ -1113,6 +1128,12 @@ uint16_t uniffi_paper_ffi_checksum_method_engine_recent_libraries(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_REFERENCES
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_REFERENCES
+uint16_t uniffi_paper_ffi_checksum_method_engine_references(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_REMOVE_FROM_COLLECTION
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_REMOVE_FROM_COLLECTION
 uint16_t uniffi_paper_ffi_checksum_method_engine_remove_from_collection(void
@@ -1125,6 +1146,12 @@ uint16_t uniffi_paper_ffi_checksum_method_engine_rename_collection(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_RESOLVE_REFERENCES
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_RESOLVE_REFERENCES
+uint16_t uniffi_paper_ffi_checksum_method_engine_resolve_references(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_RETRY_LOOKUP
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_RETRY_LOOKUP
 uint16_t uniffi_paper_ffi_checksum_method_engine_retry_lookup(void
@@ -1134,6 +1161,12 @@ uint16_t uniffi_paper_ffi_checksum_method_engine_retry_lookup(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_SAVE_NOTE
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_SAVE_NOTE
 uint16_t uniffi_paper_ffi_checksum_method_engine_save_note(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_SEARCH_REFERENCE
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_SEARCH_REFERENCE
+uint16_t uniffi_paper_ffi_checksum_method_engine_search_reference(void
     
 );
 #endif

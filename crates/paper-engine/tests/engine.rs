@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use paper_engine::{
     CitationStyle, Creator, Engine, EngineObserver, EngineOptions, Identification, ItemFields,
     ItemKind, ItemQuery, LookupStatus, MetadataPatch, PaperError, PdfStatus, PdfStep, ReaderTabs,
-    Scope, Topic, TopicTags,
+    ReferenceSource, Scope, Topic, TopicTags,
 };
 use paper_fetch::testing::FakeHttp;
 use pollster::block_on;
@@ -1811,4 +1811,87 @@ fn pdf_text_comes_page_by_page_within_the_character_budget() {
     );
     let past = block_on(h.engine.pdf_text(&id, all.page_count, 100)).unwrap();
     assert_eq!((past.page_count, past.pages.len()), (all.page_count, 0));
+}
+
+#[test]
+fn reference_entries_get_printed_identifiers_and_searches_are_asked_once() {
+    let h = harness();
+    let markdown = format!(
+        "{}\n## References\n\n\
+         1. Hinton G, Osindero S. A fast learning algorithm for deep belief nets. Neural Comput. 2006. doi:10.1162/neco.2006.18.7.1527\n\
+         2. Rumelhart D, Hinton G, Williams R. Learning representations by back-propagating errors. Nature. 1986.\n\
+         3. Vaswani A, et al. Attention is all you need. arXiv:1706.03762\n",
+        deep_learning_page(true)
+            .split("## References")
+            .next()
+            .unwrap()
+    );
+    let path = write_pdf(h._dir.path(), "lecun2015.pdf", &markdown);
+    let imported = block_on(h.engine.import_pdf(path.to_str().unwrap())).unwrap();
+    let detail = h.engine.item_detail(&imported.item.id).unwrap();
+    let attachment = detail.attachments[0].id.clone();
+
+    let references = block_on(h.engine.references(&attachment))
+        .unwrap()
+        .expect("a references section");
+    let found: Vec<_> = references
+        .references
+        .iter()
+        .map(|r| {
+            (
+                r.number,
+                r.doi.as_deref(),
+                r.arxiv_id.as_deref(),
+                r.found_by,
+            )
+        })
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            (
+                Some(1),
+                Some("10.1162/neco.2006.18.7.1527"),
+                None,
+                ReferenceSource::Printed
+            ),
+            (Some(2), None, None, ReferenceSource::Unresolved),
+            (Some(3), None, Some("1706.03762"), ReferenceSource::Printed),
+        ]
+    );
+    assert!(references.references[0].parts[0].rect.x1 > references.references[0].parts[0].rect.x0);
+
+    let unresolved = &references.references[1];
+    let title = "Learning representations by back-propagating errors";
+    h.http.route(
+        &paper_fetch::title_search_url(&unresolved.text, None),
+        200,
+        serde_json::json!({"message": {"items": [
+            {"DOI": "10.1038/323533A0", "title": [title], "type": "journal-article"},
+        ]}})
+        .to_string()
+        .into_bytes(),
+    );
+    let searched = block_on(h.engine.search_reference(&attachment, 1)).unwrap();
+    assert_eq!(searched.found_by, ReferenceSource::Search);
+    assert_eq!(searched.doi.as_deref(), Some("10.1038/323533a0"));
+    assert_eq!(searched.title.as_deref(), Some(title));
+
+    // The answer is kept: neither reading again nor asking again searches.
+    let searches = || {
+        h.http
+            .requests()
+            .iter()
+            .filter(|r| r.url.contains("query.bibliographic"))
+            .count()
+    };
+    assert_eq!(searches(), 1);
+    let again = block_on(h.engine.references(&attachment)).unwrap().unwrap();
+    assert_eq!(again.references[1].found_by, ReferenceSource::Search);
+    block_on(h.engine.search_reference(&attachment, 1)).unwrap();
+    assert_eq!(searches(), 1);
+    assert!(matches!(
+        block_on(h.engine.search_reference(&attachment, 9)),
+        Err(PaperError::NotFound { .. })
+    ));
 }

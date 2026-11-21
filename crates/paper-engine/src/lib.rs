@@ -11,6 +11,7 @@
 mod import;
 mod pool;
 mod reader;
+mod references;
 mod topics;
 
 use std::collections::HashSet;
@@ -23,11 +24,12 @@ use std::time::{Duration, Instant};
 
 pub use paper_cite::{Citation, CitationStyle};
 pub use paper_core::{
-    Annotation, AnnotationKind, AnnotationPatch, AttachmentFile, AttachmentRow, CollectionNode,
-    Creator, CreatorRole, Figure, FigureSource, Identification, ImportedPdf, ItemDetail,
-    ItemFields, ItemKind, ItemQuery, ItemRow, LookupStatus, MAX_RECENT_LIBRARIES, MetadataPatch,
-    NewAnnotation, PagePoint, PageRect, PaperError, PdfPageText, PdfStatus, PdfStep, PdfText, Quad,
-    RECENTLY_ADDED_DAYS, Scope, Settings, SortColumn, SourceRecord, Tag, Topic, WindowState,
+    Annotation, AnnotationKind, AnnotationPatch, AttachmentFile, AttachmentRow, CitationLink,
+    CollectionNode, Creator, CreatorRole, Figure, FigureSource, Identification, ImportedPdf,
+    ItemDetail, ItemFields, ItemKind, ItemQuery, ItemRow, LookupStatus, MAX_RECENT_LIBRARIES,
+    MetadataPatch, NewAnnotation, PagePoint, PageRect, PaperError, PdfPageText, PdfStatus, PdfStep,
+    PdfText, Quad, RECENTLY_ADDED_DAYS, Reference, ReferencePart, ReferenceSource, References,
+    Scope, Settings, SortColumn, SourceRecord, Tag, Topic, WindowState,
 };
 use paper_core::{Library, SettingsStore};
 pub use paper_fetch::HttpClient;
@@ -36,6 +38,7 @@ pub use paper_ids::Identifier;
 
 use crate::pool::{PoolError, ThreadPool};
 pub use crate::reader::ReaderTabs;
+use crate::references::ReferenceJob;
 pub use crate::topics::TopicTags;
 use crate::topics::{JEV_SOURCE, TopicJob};
 
@@ -642,6 +645,68 @@ impl Engine {
             })
             .await;
         match outcome {
+            Ok(outcome) => outcome,
+            Err(PoolError::Closed) => Err(PaperError::Closed),
+            Err(PoolError::Panicked(message)) => Err(PaperError::Io { message }),
+        }
+    }
+
+    /// The reference list of a PDF attachment and the in-text citations
+    /// that link to it, with each entry's identifier as far as the stored
+    /// records and the entry itself tell. No request. `None` when the file
+    /// has no references section. Reading the file takes up to a second, so
+    /// the reader asks once per open tab.
+    pub async fn references(&self, attachment_id: &str) -> Result<Option<References>> {
+        self.ensure_open()?;
+        let job = self.reference_job();
+        let attachment_id = attachment_id.to_string();
+        self.run_reference_job(move || job.read(&attachment_id))
+            .await
+    }
+
+    /// `references`, after reading the works OpenAlex lists as cited by the
+    /// paper, once per paper: one free request per cited work, so a few
+    /// seconds the first time. Offline, it answers what `references` does.
+    pub async fn resolve_references(&self, attachment_id: &str) -> Result<Option<References>> {
+        self.ensure_open()?;
+        let job = self.reference_job();
+        let attachment_id = attachment_id.to_string();
+        self.run_reference_job(move || {
+            if let Err(error) = job.fetch_cited_works(&attachment_id) {
+                tracing::warn!(%error, %attachment_id, "could not read the cited works");
+            }
+            job.read(&attachment_id)
+        })
+        .await
+    }
+
+    /// Searches Crossref for one entry that has no identifier yet, such as
+    /// when the user points at it, and keeps the answer, so the next
+    /// `references` has it. Returns the entry as it is now; `found_by` stays
+    /// `Unresolved` when the search found nothing that fits.
+    pub async fn search_reference(&self, attachment_id: &str, index: u32) -> Result<Reference> {
+        self.ensure_open()?;
+        let job = self.reference_job();
+        let attachment_id = attachment_id.to_string();
+        self.run_reference_job(move || job.search(&attachment_id, index))
+            .await
+    }
+
+    fn reference_job(&self) -> ReferenceJob {
+        let settings = self.settings.settings();
+        ReferenceJob {
+            library: Arc::clone(&self.library),
+            resolver: Arc::clone(&self.resolver),
+            contact: Contact::new(settings.contact_email),
+            openalex_api_key: Some(settings.openalex_api_key).filter(|key| !key.is_empty()),
+        }
+    }
+
+    async fn run_reference_job<T: Send + 'static>(
+        &self,
+        work: impl FnOnce() -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        match self.run(work).await {
             Ok(outcome) => outcome,
             Err(PoolError::Closed) => Err(PaperError::Closed),
             Err(PoolError::Panicked(message)) => Err(PaperError::Io { message }),

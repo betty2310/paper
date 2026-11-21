@@ -18,7 +18,7 @@ impl RateLimiter {
 
     /// Blocks until a request to `url`'s host is allowed, then records it.
     pub fn wait_for(&self, url: &str) {
-        let host = host_of(url);
+        let host = budget_of(url);
         let interval = min_interval(&host);
         let wait = {
             let mut last = self.last_request.lock().unwrap();
@@ -41,12 +41,28 @@ fn min_interval(host: &str) -> Duration {
     match host {
         // Polite pool: 10 per second.
         "api.crossref.org" => Duration::from_millis(100),
+        // Searches have their own limit of 3 per second.
+        CROSSREF_SEARCH_BUDGET => Duration::from_millis(350),
         // One request per three seconds, single connection.
         "export.arxiv.org" | "arxiv.org" => Duration::from_secs(3),
         // Content negotiation has no documented limit; redirects go elsewhere.
         "doi.org" | "dx.doi.org" => Duration::ZERO,
         // Everyone else: 5 per second.
         _ => Duration::from_millis(200),
+    }
+}
+
+/// Crossref counts searches apart from record reads, with a lower limit.
+const CROSSREF_SEARCH_BUDGET: &str = "api.crossref.org search";
+
+/// The name of the budget a request draws on: its host, except that
+/// Crossref searches have a budget of their own.
+fn budget_of(url: &str) -> String {
+    let host = host_of(url);
+    if host == "api.crossref.org" && url.contains("/works?") {
+        CROSSREF_SEARCH_BUDGET.to_string()
+    } else {
+        host
     }
 }
 
@@ -95,6 +111,13 @@ mod tests {
             "{:?}",
             start.elapsed()
         );
+
+        // Searches wait for each other, not for record reads.
+        let start = Instant::now();
+        limiter.wait_for("https://api.crossref.org/works?query.bibliographic=a");
+        limiter.wait_for("https://api.crossref.org/works?query.bibliographic=b");
+        assert!(start.elapsed() >= Duration::from_millis(350));
+        assert!(start.elapsed() < Duration::from_millis(600));
 
         let start = Instant::now();
         limiter.wait_for("https://doi.org/a");

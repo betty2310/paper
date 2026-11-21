@@ -12,11 +12,13 @@
 //! `docs/research/pdf-identification.md`.
 
 mod figure;
+mod references;
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
 pub use figure::{FIGURE_PAGES, FigureRegion, FigureSource, Rect};
+pub use references::{CitationMark, EntryPart, ReferenceEntry, ReferenceList};
 
 use paper_ids::Identifier;
 use pdf_oxide::PdfDocument;
@@ -364,11 +366,32 @@ fn join_lines(lines: &[Line]) -> String {
 /// The page's text spans grouped into lines by their vertical center, in
 /// reading order.
 fn page_lines(doc: &PdfDocument, index: usize) -> Vec<Line> {
+    placed_lines(doc, index)
+        .into_iter()
+        .map(|line| Line {
+            text: line.text,
+            font_size: line.font_size,
+        })
+        .collect()
+}
+
+/// A line of text and where it is on its page.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PlacedLine {
+    pub text: String,
+    pub font_size: f32,
+    /// In PDF user space.
+    pub rect: Rect,
+}
+
+/// `page_lines` with each line's bounds.
+pub(crate) fn placed_lines(doc: &PdfDocument, index: usize) -> Vec<PlacedLine> {
     let mut spans = doc.extract_spans(index).unwrap_or_default();
     spans.sort_by_key(|span| span.sequence);
     struct Building {
         center: f32,
         font_size: f32,
+        rect: Rect,
         /// (x, text) of each span on the line.
         parts: Vec<(f32, String)>,
     }
@@ -379,6 +402,7 @@ fn page_lines(doc: &PdfDocument, index: usize) -> Vec<Line> {
         }
         let center = span.bbox.y + span.bbox.height / 2.0;
         let tolerance = (span.bbox.height / 2.0).max(1.5);
+        let rect = Rect::from_oxide(&span.bbox);
         let part = (span.bbox.x, span.text.trim_end_matches('\n').to_string());
         // Superscripts and footnote marks join one of the last few lines.
         match lines
@@ -389,11 +413,13 @@ fn page_lines(doc: &PdfDocument, index: usize) -> Vec<Line> {
         {
             Some(line) => {
                 line.font_size = line.font_size.max(span.font_size);
+                line.rect = line.rect.union(&rect);
                 line.parts.push(part);
             }
             None => lines.push(Building {
                 center,
                 font_size: span.font_size,
+                rect,
                 parts: vec![part],
             }),
         }
@@ -408,9 +434,10 @@ fn page_lines(doc: &PdfDocument, index: usize) -> Vec<Line> {
                 .flat_map(|(_, text)| text.split_whitespace())
                 .collect::<Vec<_>>()
                 .join(" ");
-            Line {
+            PlacedLine {
                 text,
                 font_size: line.font_size,
+                rect: line.rect,
             }
         })
         .collect()

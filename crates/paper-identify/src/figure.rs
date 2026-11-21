@@ -43,7 +43,7 @@ pub struct Rect {
 }
 
 impl Rect {
-    fn from_oxide(rect: &pdf_oxide::geometry::Rect) -> Rect {
+    pub(crate) fn from_oxide(rect: &pdf_oxide::geometry::Rect) -> Rect {
         let (xa, xb) = (rect.x, rect.x + rect.width);
         let (ya, yb) = (rect.y, rect.y + rect.height);
         Rect {
@@ -62,7 +62,7 @@ impl Rect {
         self.y1 - self.y0
     }
 
-    fn union(&self, other: &Rect) -> Rect {
+    pub(crate) fn union(&self, other: &Rect) -> Rect {
         Rect {
             x0: self.x0.min(other.x0),
             y0: self.y0.min(other.y0),
@@ -305,7 +305,7 @@ fn largest_image(doc: &PdfDocument, pages: usize) -> Option<FigureRegion> {
 }
 
 impl Rect {
-    fn from_media_box((x0, y0, x1, y1): (f32, f32, f32, f32)) -> Rect {
+    pub(crate) fn from_media_box((x0, y0, x1, y1): (f32, f32, f32, f32)) -> Rect {
         Rect {
             x0: x0.min(x1),
             y0: y0.min(y1),

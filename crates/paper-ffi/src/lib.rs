@@ -12,10 +12,11 @@ use std::time::SystemTime;
 use paper_engine as engine;
 use paper_engine::{
     Annotation, AnnotationKind, AnnotationPatch, AttachmentFile, AttachmentRow, Citation,
-    CitationStyle, CollectionNode, Creator, CreatorRole, Figure, FigureSource, Identification,
-    ImportedPdf, ItemDetail, ItemFields, ItemKind, ItemQuery, ItemRow, LookupStatus, MetadataPatch,
-    NewAnnotation, PagePoint, PageRect, PaperError, PdfPageText, PdfStatus, PdfStep, PdfText, Quad,
-    ReaderTabs, Scope, Settings, SortColumn, Tag, Topic, TopicTags, WindowState,
+    CitationLink, CitationStyle, CollectionNode, Creator, CreatorRole, Figure, FigureSource,
+    Identification, ImportedPdf, ItemDetail, ItemFields, ItemKind, ItemQuery, ItemRow,
+    LookupStatus, MetadataPatch, NewAnnotation, PagePoint, PageRect, PaperError, PdfPageText,
+    PdfStatus, PdfStep, PdfText, Quad, ReaderTabs, Reference, ReferencePart, ReferenceSource,
+    References, Scope, Settings, SortColumn, Tag, Topic, TopicTags, WindowState,
 };
 
 uniffi::setup_scaffolding!();
@@ -70,6 +71,15 @@ pub enum Identification {
 pub enum FigureSource {
     Caption,
     LargestImage,
+}
+
+#[uniffi::remote(Enum)]
+pub enum ReferenceSource {
+    Deposited,
+    Printed,
+    OpenAlex,
+    Search,
+    Unresolved,
 }
 
 #[uniffi::remote(Enum)]
@@ -331,6 +341,40 @@ pub struct Figure {
 }
 
 #[uniffi::remote(Record)]
+pub struct References {
+    pub references: Vec<Reference>,
+    pub citations: Vec<CitationLink>,
+}
+
+#[uniffi::remote(Record)]
+pub struct Reference {
+    pub index: u32,
+    pub number: Option<u32>,
+    pub text: String,
+    pub parts: Vec<ReferencePart>,
+    pub doi: Option<String>,
+    pub arxiv_id: Option<String>,
+    pub url: Option<String>,
+    pub title: Option<String>,
+    pub year: Option<i32>,
+    pub found_by: ReferenceSource,
+    pub item_id: Option<String>,
+}
+
+#[uniffi::remote(Record)]
+pub struct ReferencePart {
+    pub page_index: i32,
+    pub rect: PageRect,
+}
+
+#[uniffi::remote(Record)]
+pub struct CitationLink {
+    pub page_index: i32,
+    pub rect: PageRect,
+    pub reference: u32,
+}
+
+#[uniffi::remote(Record)]
 pub struct PdfText {
     pub page_count: u32,
     pub pages: Vec<PdfPageText>,
@@ -578,6 +622,28 @@ impl Engine {
 
     pub async fn first_figure(&self, attachment_id: String) -> Result<Option<Figure>, PaperError> {
         self.0.first_figure(&attachment_id).await
+    }
+
+    pub async fn references(
+        &self,
+        attachment_id: String,
+    ) -> Result<Option<References>, PaperError> {
+        self.0.references(&attachment_id).await
+    }
+
+    pub async fn resolve_references(
+        &self,
+        attachment_id: String,
+    ) -> Result<Option<References>, PaperError> {
+        self.0.resolve_references(&attachment_id).await
+    }
+
+    pub async fn search_reference(
+        &self,
+        attachment_id: String,
+        index: u32,
+    ) -> Result<Reference, PaperError> {
+        self.0.search_reference(&attachment_id, index).await
     }
 
     pub async fn pdf_text(

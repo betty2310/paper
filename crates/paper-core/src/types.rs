@@ -446,6 +446,75 @@ pub enum FigureSource {
     LargestImage,
 }
 
+/// A paper's reference list as the reader shows it, and the in-text
+/// citations that link to it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct References {
+    /// In the order the paper prints them.
+    pub references: Vec<Reference>,
+    pub citations: Vec<CitationLink>,
+}
+
+/// One entry of a reference list, and the work it cites when known.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reference {
+    /// 0 based position in `References::references`.
+    pub index: u32,
+    /// The printed number, such as 12 for "[12]". `None` in author-year lists.
+    pub number: Option<u32>,
+    /// The entry as printed, as one paragraph.
+    pub text: String,
+    /// Where the entry is printed: one rectangle per page and column.
+    pub parts: Vec<ReferencePart>,
+    /// Lowercase, no prefix.
+    pub doi: Option<String>,
+    pub arxiv_id: Option<String>,
+    /// A web address the entry prints or links to, other than a DOI or
+    /// arXiv link.
+    pub url: Option<String>,
+    /// The cited work's title, when a source names it.
+    pub title: Option<String>,
+    pub year: Option<i32>,
+    pub found_by: ReferenceSource,
+    /// The live library item with this DOI or arXiv ID.
+    pub item_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReferencePart {
+    /// 0 based.
+    pub page_index: i32,
+    /// In PDF user space.
+    pub rect: PageRect,
+}
+
+/// How a `Reference` got its identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReferenceSource {
+    /// The reference list the publisher deposited with Crossref.
+    Deposited,
+    /// A DOI, arXiv ID, or web address the entry prints or links to.
+    Printed,
+    /// A work OpenAlex lists as cited by the paper, whose title the entry
+    /// contains.
+    OpenAlex,
+    /// A Crossref search of the entry's text, checked against its title.
+    Search,
+    /// Nothing yet. `search_reference` may still find it.
+    Unresolved,
+}
+
+/// An in-text citation: a link in the body that jumps to an entry.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CitationLink {
+    /// 0 based.
+    pub page_index: i32,
+    /// The link's rectangle in PDF user space.
+    pub rect: PageRect,
+    /// Index into `References::references`.
+    pub reference: u32,
+}
+
 /// Some pages of a PDF attachment's text, for reading the paper without
 /// the reader, such as by an AI assistant.
 #[derive(Debug, Clone, PartialEq, Eq)]
