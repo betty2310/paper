@@ -29,6 +29,9 @@ download_url="${DOWNLOAD_URL:-https://github.com/betty2310/paper/releases/downlo
 
 cd "$root"
 scripts/build-xcframework.sh release
+# The MCP server for AI assistants, a second executable next to the app's.
+MACOSX_DEPLOYMENT_TARGET=13.0 cargo build --release --package paper-mcp \
+  --target aarch64-apple-darwin --target x86_64-apple-darwin
 
 # One build per architecture, joined with lipo. A single `--arch arm64 --arch
 # x86_64` build goes through xcbuild, which with Xcode 26 fails to link the
@@ -46,6 +49,8 @@ for arch in arm64 x86_64; do
   dsymutil "$bin/Paper" -o "$dist/Paper-$arch.dSYM"
 done
 lipo -create "$dist"/Paper-{arm64,x86_64} -output "$app/Contents/MacOS/Paper"
+lipo -create "$root"/target/{aarch64,x86_64}-apple-darwin/release/paper-mcp \
+  -output "$app/Contents/MacOS/paper-mcp"
 rm "$dist"/Paper-{arm64,x86_64}
 # Sparkle's framework is universal already; any build's copy will do.
 ditto "$bin/Sparkle.framework" "$app/Contents/Frameworks/Sparkle.framework"
@@ -74,6 +79,7 @@ sign --preserve-metadata=entitlements "$sparkle/XPCServices/Downloader.xpc"
 sign "$sparkle/Autoupdate"
 sign "$sparkle/Updater.app"
 sign "$app/Contents/Frameworks/Sparkle.framework"
+sign "$app/Contents/MacOS/paper-mcp"
 sign "$app"
 codesign --verify --deep --strict "$app"
 

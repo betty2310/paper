@@ -102,6 +102,16 @@ impl PdfFile {
         head
     }
 
+    pub fn page_count(&self) -> usize {
+        self.doc.page_count().unwrap_or(0)
+    }
+
+    /// The text of a page (0 based), one line per line in reading order.
+    /// Empty for a scanned page or a page that cannot be read.
+    pub fn page_text(&self, index: usize) -> String {
+        join_lines(&page_lines(&self.doc, index))
+    }
+
     /// Page 1 as a PNG whose longer side is at most `max_side` pixels, or
     /// `None` when it cannot be drawn.
     pub fn render_first_page(&self, max_side: u32) -> Option<Vec<u8>> {

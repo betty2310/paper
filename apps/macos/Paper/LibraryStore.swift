@@ -744,6 +744,22 @@ final class LibraryStore: ObservableObject {
         perform { try engine.setPinnedTabs(itemIds: itemIds) }
     }
 
+    /// What the engine was last told about the reader tabs.
+    private var readerTabs: ReaderTabs?
+
+    /// Tells AI assistants, through paper-mcp, which PDFs the tabs show and
+    /// which one the user reads. Only a change is written. A failure is
+    /// logged, not shown: it only costs the assistants that answer.
+    func setReaderTabs(_ tabs: ReaderTabs) {
+        guard tabs != readerTabs else { return }
+        readerTabs = tabs
+        do {
+            try engine.setReaderTabs(tabs: tabs)
+        } catch {
+            Self.logger.error("setReaderTabs failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     func close() {
         flushNote()
         engine.close()

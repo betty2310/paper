@@ -17,6 +17,94 @@ Search filters the table on every keystroke through a synchronous engine call. P
 
 After changing the engine API in `crates/paper-engine` and `crates/paper-ffi`, run `scripts/generate-bindings.sh`, commit the regenerated files in `apps/macos/PaperEngine`, and rebuild the XCFramework. `cargo test --workspace` runs the engine tests on any OS.
 
+## Connect Claude, Codex, or another AI agent
+
+`paper-mcp` is an MCP server that lets AI agents read your Paper library. An agent can search the library, read a paper's PDF text page by page, list your highlights and notes, and cite papers with your citation keys. While Paper runs, the agent also knows which paper is open in the reader, so you can ask "summarize the paper I'm reading". The server only reads. It never changes the library, and it also works when Paper is closed.
+
+The server is inside the app at `/Applications/Paper.app/Contents/MacOS/paper-mcp`. The agent starts it by itself; you do not run it. For a development build, `cargo build --release -p paper-mcp` makes `target/release/paper-mcp`; use that path in the steps below.
+
+### Claude Code
+
+1. Add the server once for all your projects:
+
+   ```sh
+   claude mcp add --scope user paper -- /Applications/Paper.app/Contents/MacOS/paper-mcp
+   ```
+
+2. Check it: `claude mcp list` shows `paper: … ✔ Connected`. Inside Claude Code, `/mcp` shows the server and its 8 tools.
+3. The first time Claude calls a Paper tool, it asks for permission. All the tools only read, so "Yes, and don't ask again" is safe.
+
+To share it with a project instead, put this in `.mcp.json` at the project root:
+
+```json
+{ "mcpServers": { "paper": { "command": "/Applications/Paper.app/Contents/MacOS/paper-mcp" } } }
+```
+
+### Codex (CLI, IDE extension, and desktop app)
+
+1. Add the server:
+
+   ```sh
+   codex mcp add paper -- /Applications/Paper.app/Contents/MacOS/paper-mcp
+   ```
+
+   Or add it to `~/.codex/config.toml` yourself:
+
+   ```toml
+   [mcp_servers.paper]
+   command = "/Applications/Paper.app/Contents/MacOS/paper-mcp"
+   ```
+
+2. Check it: `codex mcp list` shows `paper`. Inside Codex, `/mcp` shows its tools. The CLI, the IDE extension, and the desktop app share this setting.
+
+### Claude Desktop
+
+1. Open Claude › Settings › Developer › Edit Config. This opens `~/Library/Application Support/Claude/claude_desktop_config.json`.
+2. Add Paper under `mcpServers`:
+
+   ```json
+   {
+     "mcpServers": {
+       "paper": { "command": "/Applications/Paper.app/Contents/MacOS/paper-mcp" }
+     }
+   }
+   ```
+
+3. Quit Claude Desktop and open it again. Paper's tools are listed under the tools button in the message box.
+
+### Other agents
+
+Any MCP client that starts local servers over stdio works the same way: the command is the path to `paper-mcp`, with no arguments.
+
+### What to ask
+
+- "Summarize the paper I'm reading." The agent calls `current_paper`, then `read_paper`.
+- "What did I highlight in this paper, and why might it matter?"
+- "Find my papers on diffusion models and give me BibTeX for them."
+- "Compare the paper I'm reading with vaswani2017attention."
+
+| Tool | What it returns |
+|---|---|
+| `current_paper` | The paper in front in Paper's reader, the page you are on, and the other open tabs |
+| `read_paper` | PDF text with `[page N]` markers, about 30,000 characters per call; the agent calls again to read on |
+| `get_annotations` | Your highlights and notes, in page order |
+| `search_papers` | Papers by words, collection, tag, or smart list |
+| `get_paper` | One paper's metadata, abstract, tags, collections, and note |
+| `list_collections`, `list_tags` | The collection tree and the tags, with paper counts |
+| `get_citations` | BibTeX or APA |
+
+A paper can be named by its id, citation key, DOI, or arXiv ID.
+
+### Which library it reads
+
+By default the server reads the library Paper opened last, and follows you when you switch libraries. To pick another one, add `--library <folder>` after the command, or set `PAPER_LIBRARY`:
+
+```sh
+claude mcp add --scope user paper -- /Applications/Paper.app/Contents/MacOS/paper-mcp --library ~/Documents/Paper
+```
+
+If the agent says it cannot open the library, open it in Paper once: the server does not upgrade a library written by an older version of Paper. `paper-mcp --help` prints these options.
+
 ## Releases
 
 Pushing a tag such as `v0.2.0` runs [`.github/workflows/release.yml`](.github/workflows/release.yml) on a macOS runner. It calls `scripts/package-macos-app.sh 0.2.0`, which builds a universal `Paper.app`, signs it, zips it, and writes a Sparkle `appcast.xml`. Then it publishes both files as the GitHub release. A tag run cannot restore caches that other tags saved, so [`.github/workflows/rust-cache.yml`](.github/workflows/rust-cache.yml) compiles the Rust dependencies on `main` (when a `Cargo.toml` or `Cargo.lock` changes, and weekly) and the release restores them. A tag pushed before that run finishes builds them from scratch. The app checks `releases/latest/download/appcast.xml` once a day and offers the update. Paper › Check for Updates… checks right away. Sparkle installs an update only when the zip's EdDSA signature matches the public key built into the running app.

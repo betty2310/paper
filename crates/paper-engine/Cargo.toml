@@ -13,6 +13,8 @@ paper-identify.workspace = true
 paper-cite.workspace = true
 futures-channel.workspace = true
 tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 paper-fetch = { workspace = true, features = ["testing"] }

@@ -14,8 +14,8 @@ use paper_engine::{
     Annotation, AnnotationKind, AnnotationPatch, AttachmentFile, AttachmentRow, Citation,
     CitationStyle, CollectionNode, Creator, CreatorRole, Figure, FigureSource, Identification,
     ImportedPdf, ItemDetail, ItemFields, ItemKind, ItemQuery, ItemRow, LookupStatus, MetadataPatch,
-    NewAnnotation, PagePoint, PageRect, PaperError, PdfStatus, PdfStep, Quad, Scope, Settings,
-    SortColumn, Tag, Topic, TopicTags, WindowState,
+    NewAnnotation, PagePoint, PageRect, PaperError, PdfPageText, PdfStatus, PdfStep, PdfText, Quad,
+    ReaderTabs, Scope, Settings, SortColumn, Tag, Topic, TopicTags, WindowState,
 };
 
 uniffi::setup_scaffolding!();
@@ -331,6 +331,24 @@ pub struct Figure {
 }
 
 #[uniffi::remote(Record)]
+pub struct PdfText {
+    pub page_count: u32,
+    pub pages: Vec<PdfPageText>,
+}
+
+#[uniffi::remote(Record)]
+pub struct PdfPageText {
+    pub page_index: u32,
+    pub text: String,
+}
+
+#[uniffi::remote(Record)]
+pub struct ReaderTabs {
+    pub attachment_ids: Vec<String>,
+    pub front: Option<String>,
+}
+
+#[uniffi::remote(Record)]
 pub struct Annotation {
     pub id: String,
     pub attachment_id: String,
@@ -504,6 +522,10 @@ impl Engine {
         self.0.item_detail(&id)
     }
 
+    pub fn find_item(&self, reference: String) -> Result<Option<String>, PaperError> {
+        self.0.find_item(&reference)
+    }
+
     pub async fn add_by_identifier(&self, text: String) -> Result<ItemRow, PaperError> {
         self.0.add_by_identifier(&text).await
     }
@@ -556,6 +578,23 @@ impl Engine {
 
     pub async fn first_figure(&self, attachment_id: String) -> Result<Option<Figure>, PaperError> {
         self.0.first_figure(&attachment_id).await
+    }
+
+    pub async fn pdf_text(
+        &self,
+        attachment_id: String,
+        first_page: u32,
+        max_chars: u32,
+    ) -> Result<PdfText, PaperError> {
+        self.0.pdf_text(&attachment_id, first_page, max_chars).await
+    }
+
+    pub fn set_reader_tabs(&self, tabs: ReaderTabs) -> Result<(), PaperError> {
+        self.0.set_reader_tabs(tabs)
+    }
+
+    pub fn reader_tabs(&self) -> Result<Option<ReaderTabs>, PaperError> {
+        self.0.reader_tabs()
     }
 
     pub fn set_reading_position(&self, id: String, page: i32, zoom: f64) -> Result<(), PaperError> {

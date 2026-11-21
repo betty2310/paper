@@ -37,6 +37,9 @@ type Result<T> = std::result::Result<T, PaperError>;
 pub struct Library {
     dir: PathBuf,
     conn: Mutex<Connection>,
+    /// Opened by `open_read_only`: every write fails, and closing leaves the
+    /// WAL to the app that owns the library.
+    read_only: bool,
 }
 
 impl Library {
@@ -59,6 +62,7 @@ impl Library {
         Ok(Library {
             dir,
             conn: Mutex::new(conn),
+            read_only: false,
         })
     }
 
@@ -78,6 +82,51 @@ impl Library {
         Ok(Library {
             dir,
             conn: Mutex::new(conn),
+            read_only: false,
+        })
+    }
+
+    /// Opens the library in `dir` for reading only, alongside the app that may
+    /// have it open. Nothing is migrated: a library whose schema is older or
+    /// newer than this build's is refused, so another program never upgrades
+    /// a library behind the app's back.
+    pub fn open_read_only(dir: impl AsRef<Path>) -> Result<Library> {
+        let dir = dir.as_ref().to_path_buf();
+        if !Library::is_library(&dir) {
+            return Err(PaperError::Library {
+                message: format!(
+                    "{} is not a Paper library (no {LIBRARY_DB_NAME})",
+                    dir.display()
+                ),
+            });
+        }
+        // Read-write without create, then `query_only`: a connection opened
+        // with SQLITE_OPEN_READ_ONLY leaves `-wal` and `-shm` files behind
+        // when it closes last, and a synced folder should hold one file.
+        let conn = Connection::open_with_flags(
+            dir.join(LIBRARY_DB_NAME),
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        configure(&conn)?;
+        conn.pragma_update(None, "query_only", "ON")?;
+        let version = schema_version(&conn)?;
+        if version != MIGRATIONS.len() {
+            let message = if version < MIGRATIONS.len() {
+                "the library was written by an older version of Paper; open it in Paper once to upgrade it"
+            } else {
+                "the library was written by a newer version of Paper"
+            };
+            return Err(PaperError::Library {
+                message: format!(
+                    "{message} (schema {version}, this build knows {})",
+                    MIGRATIONS.len()
+                ),
+            });
+        }
+        Ok(Library {
+            dir,
+            conn: Mutex::new(conn),
+            read_only: true,
         })
     }
 
@@ -89,6 +138,7 @@ impl Library {
         Ok(Library {
             dir: PathBuf::new(),
             conn: Mutex::new(conn),
+            read_only: false,
         })
     }
 
@@ -101,6 +151,9 @@ impl Drop for Library {
     /// Folds the WAL back into `library.db` so a library in a synced folder
     /// (Dropbox, iCloud Drive) leaves one file behind, not three.
     fn drop(&mut self) {
+        if self.read_only {
+            return;
+        }
         if let Ok(conn) = self.conn.lock() {
             let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
         }
@@ -375,6 +428,20 @@ impl Library {
     pub fn find_item_by_doi(&self, doi: &str) -> Result<Option<DoiMatch>> {
         let conn = self.conn.lock().unwrap();
         find_by_doi(&conn, doi)
+    }
+
+    /// The live item with this citation key, compared without regard to case
+    /// like the keys themselves.
+    pub fn find_item_by_citation_key(&self, key: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn
+            .query_row(
+                "SELECT id FROM items
+                 WHERE citation_key = ?1 COLLATE NOCASE AND deleted_at IS NULL",
+                params![key],
+                |row| row.get(0),
+            )
+            .optional()?)
     }
 
     pub fn item(&self, id: &str) -> Result<ItemDetail> {
@@ -1587,8 +1654,7 @@ fn configure(conn: &Connection) -> Result<()> {
 
 /// Applies the numbered migrations above the database's `user_version`.
 fn migrate(conn: &Connection) -> Result<()> {
-    let version: usize =
-        conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))? as usize;
+    let version = schema_version(conn)?;
     if version > MIGRATIONS.len() {
         return Err(PaperError::Library {
             message: format!(
@@ -1605,6 +1671,10 @@ fn migrate(conn: &Connection) -> Result<()> {
         ))?;
     }
     Ok(())
+}
+
+fn schema_version(conn: &Connection) -> Result<usize> {
+    Ok(conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))? as usize)
 }
 
 // ----- helpers used inside transactions -----
@@ -1905,6 +1975,47 @@ mod tests {
             ),
             "a database from a newer Paper is refused, not migrated or broken"
         );
+    }
+
+    #[test]
+    fn a_read_only_library_never_migrates_or_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Library");
+        let id = Library::create(&path)
+            .unwrap()
+            .insert_item(&paper("Persisted", None, &[], None), LookupStatus::Done)
+            .unwrap();
+
+        let library = Library::open_read_only(&path).unwrap();
+        assert_eq!(library.item(&id).unwrap().fields.title, "Persisted");
+        assert!(library.save_note(&id, "written").is_err());
+        drop(library);
+        assert!(
+            !path.join(format!("{LIBRARY_DB_NAME}-wal")).exists(),
+            "a reader that closes last leaves one file too"
+        );
+
+        let set_version = |version: usize| {
+            Connection::open(path.join(LIBRARY_DB_NAME))
+                .unwrap()
+                .pragma_update(None, "user_version", version as i64)
+                .unwrap()
+        };
+        set_version(MIGRATIONS.len() - 1);
+        assert!(matches!(
+            Library::open_read_only(&path),
+            Err(PaperError::Library { message }) if message.contains("open it in Paper")
+        ));
+        let version = Connection::open(path.join(LIBRARY_DB_NAME))
+            .unwrap()
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .unwrap();
+        assert_eq!(version as usize, MIGRATIONS.len() - 1, "not migrated");
+        set_version(MIGRATIONS.len() + 1);
+        assert!(matches!(
+            Library::open_read_only(&path),
+            Err(PaperError::Library { message }) if message.contains("newer version")
+        ));
     }
 
     #[test]

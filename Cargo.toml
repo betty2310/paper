@@ -8,6 +8,7 @@ members = [
     "crates/paper-cite",
     "crates/paper-engine",
     "crates/paper-ffi",
+    "crates/paper-mcp",
     "tools/uniffi-bindgen",
 ]
 
@@ -40,6 +41,10 @@ sha2 = "0.10"
 pollster = "0.4"
 regex = "1"
 base64 = "0.22"
+# The MCP server only: the SDK runs on tokio, which stays out of the engine.
+rmcp = { version = "3.11", default-features = false, features = ["server", "macros", "transport-io"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std"] }
+schemars = "1"
 # Pure Rust. `rendering` draws page 1 for the model fallback.
 pdf_oxide = { version = "0.3.78", default-features = false, features = ["rendering"] }
 

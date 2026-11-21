@@ -412,6 +412,11 @@ void uniffi_paper_ffi_fn_method_engine_delete_items(uint64_t ptr, RustBuffer ids
 uint64_t uniffi_paper_ffi_fn_method_engine_export_bib(uint64_t ptr, RustBuffer ids, RustBuffer path
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_FIND_ITEM
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_FIND_ITEM
+RustBuffer uniffi_paper_ffi_fn_method_engine_find_item(uint64_t ptr, RustBuffer reference, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_FIND_PDF
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_FIND_PDF
 uint64_t uniffi_paper_ffi_fn_method_engine_find_pdf(uint64_t ptr, RustBuffer item_id
@@ -452,9 +457,19 @@ void uniffi_paper_ffi_fn_method_engine_move_collection(uint64_t ptr, RustBuffer 
 RustBuffer uniffi_paper_ffi_fn_method_engine_note(uint64_t ptr, RustBuffer item_id, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_PDF_TEXT
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_PDF_TEXT
+uint64_t uniffi_paper_ffi_fn_method_engine_pdf_text(uint64_t ptr, RustBuffer attachment_id, uint32_t first_page, uint32_t max_chars
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_PINNED_TABS
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_PINNED_TABS
 RustBuffer uniffi_paper_ffi_fn_method_engine_pinned_tabs(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_READER_TABS
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_READER_TABS
+RustBuffer uniffi_paper_ffi_fn_method_engine_reader_tabs(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_RECENT_LIBRARIES
@@ -495,6 +510,11 @@ void uniffi_paper_ffi_fn_method_engine_set_observer(uint64_t ptr, uint64_t obser
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SET_PINNED_TABS
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SET_PINNED_TABS
 void uniffi_paper_ffi_fn_method_engine_set_pinned_tabs(uint64_t ptr, RustBuffer item_ids, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SET_READER_TABS
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SET_READER_TABS
+void uniffi_paper_ffi_fn_method_engine_set_reader_tabs(uint64_t ptr, RustBuffer tabs, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_FN_METHOD_ENGINE_SET_READING_POSITION
@@ -1015,6 +1035,12 @@ uint16_t uniffi_paper_ffi_checksum_method_engine_export_bib(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_FIND_ITEM
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_FIND_ITEM
+uint16_t uniffi_paper_ffi_checksum_method_engine_find_item(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_FIND_PDF
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_FIND_PDF
 uint16_t uniffi_paper_ffi_checksum_method_engine_find_pdf(void
@@ -1063,9 +1089,21 @@ uint16_t uniffi_paper_ffi_checksum_method_engine_note(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_PDF_TEXT
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_PDF_TEXT
+uint16_t uniffi_paper_ffi_checksum_method_engine_pdf_text(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_PINNED_TABS
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_PINNED_TABS
 uint16_t uniffi_paper_ffi_checksum_method_engine_pinned_tabs(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_READER_TABS
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_READER_TABS
+uint16_t uniffi_paper_ffi_checksum_method_engine_reader_tabs(void
     
 );
 #endif
@@ -1114,6 +1152,12 @@ uint16_t uniffi_paper_ffi_checksum_method_engine_set_observer(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_SET_PINNED_TABS
 #define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_SET_PINNED_TABS
 uint16_t uniffi_paper_ffi_checksum_method_engine_set_pinned_tabs(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_SET_READER_TABS
+#define UNIFFI_FFIDEF_UNIFFI_PAPER_FFI_CHECKSUM_METHOD_ENGINE_SET_READER_TABS
+uint16_t uniffi_paper_ffi_checksum_method_engine_set_reader_tabs(void
     
 );
 #endif

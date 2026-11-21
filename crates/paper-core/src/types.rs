@@ -446,6 +446,23 @@ pub enum FigureSource {
     LargestImage,
 }
 
+/// Some pages of a PDF attachment's text, for reading the paper without
+/// the reader, such as by an AI assistant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PdfText {
+    pub page_count: u32,
+    /// Consecutive pages; empty when the first page asked for is past the end.
+    pub pages: Vec<PdfPageText>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PdfPageText {
+    /// 0 based.
+    pub page_index: u32,
+    /// One line per line; empty for a scanned page.
+    pub text: String,
+}
+
 /// A highlight or note on one page of a PDF attachment. The PDF file is never
 /// changed; annotations live only in the library.
 #[derive(Debug, Clone, PartialEq)]

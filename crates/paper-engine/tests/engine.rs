@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use paper_engine::{
     CitationStyle, Creator, Engine, EngineObserver, EngineOptions, Identification, ItemFields,
-    ItemKind, ItemQuery, LookupStatus, MetadataPatch, PaperError, PdfStatus, PdfStep, Scope, Topic,
-    TopicTags,
+    ItemKind, ItemQuery, LookupStatus, MetadataPatch, PaperError, PdfStatus, PdfStep, ReaderTabs,
+    Scope, Topic, TopicTags,
 };
 use paper_fetch::testing::FakeHttp;
 use pollster::block_on;
@@ -110,6 +110,7 @@ fn harness_with(manual_pdf_search: bool) -> Harness {
             settings_dir: Some(dir.path().join("settings")),
             http: Some(http.clone()),
             manual_pdf_search,
+            ..EngineOptions::default()
         },
     )
     .unwrap();
@@ -500,6 +501,7 @@ fn a_read_only_settings_directory_does_not_keep_the_library_closed() {
             settings_dir: Some(not_a_dir.clone()),
             http: Some(Arc::new(FakeHttp::new())),
             manual_pdf_search: true,
+            ..EngineOptions::default()
         },
     )
     .expect("the library opens even if the recent list cannot be written");
@@ -677,6 +679,7 @@ fn libraries_are_remembered_and_reopen_with_their_data() {
         settings_dir: Some(settings_dir.clone()),
         http: None,
         manual_pdf_search: true,
+        ..EngineOptions::default()
     };
     let a = dir.path().join("A");
     let b = dir.path().join("B");
@@ -785,6 +788,7 @@ fn pinned_tabs_are_remembered_per_library() {
         settings_dir: Some(dir.path().join("settings")),
         http: None,
         manual_pdf_search: true,
+        ..EngineOptions::default()
     };
     let a = Engine::create_library_with(dir.path().join("A"), options()).unwrap();
     let b = Engine::create_library_with(dir.path().join("B"), options()).unwrap();
@@ -1657,4 +1661,154 @@ fn without_a_jev_key_nothing_is_sent_to_typesafe() {
     block_on(h.engine.add_by_identifier("10.1038/nature14539")).unwrap();
     assert!(jev_requests(&h.http).is_empty());
     assert!(h.engine.tags().unwrap().is_empty());
+}
+
+/// What the MCP server relies on: it reads the library beside the app,
+/// never writes, and knows which PDF the app shows only while the app runs.
+#[test]
+fn a_read_only_engine_reads_beside_the_app_and_sees_its_reader_tabs() {
+    let dir = tempfile::tempdir().unwrap();
+    let library = dir.path().join("Library");
+    let app = Engine::create_library_with(
+        &library,
+        EngineOptions {
+            settings_dir: Some(dir.path().join("settings")),
+            http: Some(Arc::new(FakeHttp::new())),
+            manual_pdf_search: true,
+            ..EngineOptions::default()
+        },
+    )
+    .unwrap();
+    let row = app
+        .create_item(&ItemFields {
+            title: "Deep learning".into(),
+            doi: Some("10.1038/nature14539".into()),
+            creators: vec![Creator::person("Yann", "LeCun")],
+            year: Some(2015),
+            ..ItemFields::default()
+        })
+        .unwrap();
+    let pdf = write_pdf(dir.path(), "deep.pdf", &deep_learning_page(true));
+    let attached = block_on(app.attach_file(&row.id, pdf.to_str().unwrap())).unwrap();
+    let key = app.item_detail(&row.id).unwrap().citation_key.unwrap();
+
+    let reader_settings = dir.path().join("reader-settings");
+    let reader = Engine::open_library_with(
+        &library,
+        EngineOptions {
+            settings_dir: Some(reader_settings.clone()),
+            read_only: true,
+            ..EngineOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        paper_engine::recent_libraries_in(&reader_settings).is_empty(),
+        "reading a library does not make it recent"
+    );
+
+    // A paper by any name a model may have for it.
+    for reference in [
+        row.id.clone(),
+        key.clone(),
+        key.to_uppercase(),
+        " https://doi.org/10.1038/NATURE14539 ".to_string(),
+    ] {
+        assert_eq!(
+            reader.find_item(&reference).unwrap(),
+            Some(row.id.clone()),
+            "{reference}"
+        );
+    }
+    assert_eq!(reader.find_item("deep learning").unwrap(), None);
+    assert_eq!(reader.find_item("10.1038/nature99999").unwrap(), None);
+
+    // Writes fail, and the app's later writes are read.
+    assert!(reader.save_note(&row.id, "from the reader").is_err());
+    app.save_note(&row.id, "Read section 3 again").unwrap();
+    assert_eq!(
+        reader.note(&row.id).unwrap().as_deref(),
+        Some("Read section 3 again")
+    );
+
+    assert_eq!(
+        reader.reader_tabs().unwrap(),
+        Some(ReaderTabs::default()),
+        "the app runs but has told no tabs"
+    );
+    let tabs = ReaderTabs {
+        attachment_ids: vec![attached.id.clone()],
+        front: Some(attached.id.clone()),
+    };
+    app.set_reader_tabs(tabs.clone()).unwrap();
+    assert_eq!(reader.reader_tabs().unwrap(), Some(tabs.clone()));
+
+    // Like an app that crashed: its tabs file stays, its lock goes.
+    drop(app);
+    assert_eq!(reader.reader_tabs().unwrap(), None);
+
+    let app = Engine::open_library_with(
+        &library,
+        EngineOptions {
+            settings_dir: Some(dir.path().join("settings")),
+            ..EngineOptions::default()
+        },
+    )
+    .unwrap();
+    app.set_reader_tabs(tabs.clone()).unwrap();
+    assert_eq!(reader.reader_tabs().unwrap(), Some(tabs));
+    app.close();
+    assert_eq!(reader.reader_tabs().unwrap(), None);
+}
+
+#[test]
+fn pdf_text_comes_page_by_page_within_the_character_budget() {
+    let h = harness();
+    let row = h
+        .engine
+        .create_item(&ItemFields {
+            title: "A long paper".into(),
+            ..ItemFields::default()
+        })
+        .unwrap();
+    let markdown: String = (1..=150)
+        .map(|n| format!("Paragraph {n} is about residual learning.\n\n"))
+        .collect();
+    let pdf = write_pdf(h._dir.path(), "long.pdf", &markdown);
+    let id = block_on(h.engine.attach_file(&row.id, pdf.to_str().unwrap()))
+        .unwrap()
+        .id;
+
+    let all = block_on(h.engine.pdf_text(&id, 0, u32::MAX)).unwrap();
+    assert!(all.page_count >= 3, "{} pages", all.page_count);
+    assert_eq!(
+        all.pages
+            .iter()
+            .map(|page| page.page_index)
+            .collect::<Vec<_>>(),
+        (0..all.page_count).collect::<Vec<_>>()
+    );
+    let text: String = all.pages.iter().map(|page| page.text.as_str()).collect();
+    let mut from = 0;
+    for n in 1..=150 {
+        let at = text[from..]
+            .find(&format!("Paragraph {n} is"))
+            .unwrap_or_else(|| panic!("paragraph {n} missing or out of order"));
+        from += at;
+    }
+
+    let chars = |index: usize| all.pages[index].text.chars().count() as u32;
+    let first_two = chars(0) + chars(1);
+    let two = block_on(h.engine.pdf_text(&id, 0, first_two)).unwrap();
+    assert_eq!(two.pages, all.pages[..2]);
+    let one = block_on(h.engine.pdf_text(&id, 0, first_two - 1)).unwrap();
+    assert_eq!(one.pages, all.pages[..1]);
+    let small = block_on(h.engine.pdf_text(&id, 1, 1)).unwrap();
+    assert_eq!(
+        small.pages,
+        all.pages[1..2],
+        "one page even when it is over the budget"
+    );
+    let past = block_on(h.engine.pdf_text(&id, all.page_count, 100)).unwrap();
+    assert_eq!((past.page_count, past.pages.len()), (all.page_count, 0));
 }

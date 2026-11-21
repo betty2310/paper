@@ -31,6 +31,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private var readers: [ReaderViewController] = []
     /// The reader in front, or nil for the library.
     private var activeReader: ReaderViewController?
+    /// The reader that was in front last. While the library is in front, it
+    /// is still the paper the user reads.
+    private weak var lastActiveReader: ReaderViewController?
     /// A paper the user asked to open while its PDF was still downloading.
     private var pendingOpen: String?
     private var inspectorItem: NSSplitViewItem!
@@ -579,6 +582,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         }
         sidebarContent.show(reader.sidebar, from: activeReader == nil ? .library : .reader)
         activeReader = reader
+        lastActiveReader = reader
         center.show(reader, animated: true)
         setInspectorCollapsed(true)
         updateTabs(landing: landing ? reader.itemId : nil)
@@ -630,8 +634,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
     /// The strip is in the toolbar only while a PDF is open, so an empty
-    /// toolbar item never takes space or draws.
+    /// toolbar item never takes space or draws. The engine hears of every
+    /// change too, for AI assistants that ask what the user reads.
     private func updateTabs(landing: String? = nil) {
+        let front = activeReader ?? readers.first { $0 === lastActiveReader }
+        store.setReaderTabs(ReaderTabs(attachmentIds: readers.map(\.attachmentId), front: front?.attachmentId))
         let tabs = readers.isEmpty ? [] : [TabStripView.Tab(id: TabStripView.Tab.libraryId, title: "Library")]
             + readers.map { TabStripView.Tab(id: $0.itemId, title: $0.paperTitle, isPinned: pinnedIds.contains($0.itemId)) }
         guard let toolbar = window?.toolbar else { return }

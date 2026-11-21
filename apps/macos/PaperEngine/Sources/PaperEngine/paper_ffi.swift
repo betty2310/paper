@@ -700,6 +700,8 @@ public protocol EngineProtocol: AnyObject, Sendable {
     
     func exportBib(ids: [String], path: String) async throws  -> UInt32
     
+    func findItem(reference: String) throws  -> String?
+    
     func findPdf(itemId: String) async throws  -> AttachmentRow
     
     func firstFigure(attachmentId: String) async throws  -> Figure?
@@ -716,7 +718,11 @@ public protocol EngineProtocol: AnyObject, Sendable {
     
     func note(itemId: String) throws  -> String?
     
+    func pdfText(attachmentId: String, firstPage: UInt32, maxChars: UInt32) async throws  -> PdfText
+    
     func pinnedTabs()  -> [String]
+    
+    func readerTabs() throws  -> ReaderTabs?
     
     func recentLibraries()  -> [String]
     
@@ -733,6 +739,8 @@ public protocol EngineProtocol: AnyObject, Sendable {
     func setObserver(observer: EngineObserver) 
     
     func setPinnedTabs(itemIds: [String]) throws 
+    
+    func setReaderTabs(tabs: ReaderTabs) throws 
     
     func setReadingPosition(id: String, page: Int32, zoom: Double) throws 
     
@@ -1018,6 +1026,16 @@ open func exportBib(ids: [String], path: String)async throws  -> UInt32  {
         )
 }
     
+open func findItem(reference: String)throws  -> String?  {
+    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypePaperError_lift) {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engine_find_item(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(reference),uniffiCallStatus
+    )
+})
+}
+    
 open func findPdf(itemId: String)async throws  -> AttachmentRow  {
     return
         try  await uniffiRustCallAsync(
@@ -1116,10 +1134,35 @@ open func note(itemId: String)throws  -> String?  {
 })
 }
     
+open func pdfText(attachmentId: String, firstPage: UInt32, maxChars: UInt32)async throws  -> PdfText  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_paper_ffi_fn_method_engine_pdf_text(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(attachmentId),FfiConverterUInt32.lower(firstPage),FfiConverterUInt32.lower(maxChars)
+                )
+            },
+            pollFunc: ffi_paper_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_paper_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_paper_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypePdfText_lift,
+            errorHandler: FfiConverterTypePaperError_lift
+        )
+}
+    
 open func pinnedTabs() -> [String]  {
     return try!  FfiConverterSequenceString.lift(try! rustCall() {
         uniffiCallStatus in
     uniffi_paper_ffi_fn_method_engine_pinned_tabs(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+open func readerTabs()throws  -> ReaderTabs?  {
+    return try  FfiConverterOptionTypeReaderTabs.lift(try rustCallWithError(FfiConverterTypePaperError_lift) {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engine_reader_tabs(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -1204,6 +1247,15 @@ open func setPinnedTabs(itemIds: [String])throws   {try rustCallWithError(FfiCon
     uniffi_paper_ffi_fn_method_engine_set_pinned_tabs(
             self.uniffiCloneHandle(),
         FfiConverterSequenceString.lower(itemIds),uniffiCallStatus
+    )
+}
+}
+    
+open func setReaderTabs(tabs: ReaderTabs)throws   {try rustCallWithError(FfiConverterTypePaperError_lift) {
+        uniffiCallStatus in
+    uniffi_paper_ffi_fn_method_engine_set_reader_tabs(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeReaderTabs_lower(tabs),uniffiCallStatus
     )
 }
 }
@@ -3060,6 +3112,114 @@ public func FfiConverterTypePageRect_lower(_ value: PageRect) -> RustBuffer {
 }
 
 
+public struct PdfPageText: Equatable, Hashable {
+    public var pageIndex: UInt32
+    public var text: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(pageIndex: UInt32, text: String) {
+        self.pageIndex = pageIndex
+        self.text = text
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension PdfPageText: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePdfPageText: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PdfPageText {
+        return
+            try PdfPageText(
+                pageIndex: FfiConverterUInt32.read(from: &buf), 
+                text: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PdfPageText, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.pageIndex, into: &buf)
+        FfiConverterString.write(value.text, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePdfPageText_lift(_ buf: RustBuffer) throws -> PdfPageText {
+    return try FfiConverterTypePdfPageText.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePdfPageText_lower(_ value: PdfPageText) -> RustBuffer {
+    return FfiConverterTypePdfPageText.lower(value)
+}
+
+
+public struct PdfText: Equatable, Hashable {
+    public var pageCount: UInt32
+    public var pages: [PdfPageText]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(pageCount: UInt32, pages: [PdfPageText]) {
+        self.pageCount = pageCount
+        self.pages = pages
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension PdfText: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePdfText: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PdfText {
+        return
+            try PdfText(
+                pageCount: FfiConverterUInt32.read(from: &buf), 
+                pages: FfiConverterSequenceTypePdfPageText.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PdfText, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.pageCount, into: &buf)
+        FfiConverterSequenceTypePdfPageText.write(value.pages, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePdfText_lift(_ buf: RustBuffer) throws -> PdfText {
+    return try FfiConverterTypePdfText.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePdfText_lower(_ value: PdfText) -> RustBuffer {
+    return FfiConverterTypePdfText.lower(value)
+}
+
+
 public struct Quad: Equatable, Hashable {
     public var topLeft: PagePoint
     public var topRight: PagePoint
@@ -3119,6 +3279,60 @@ public func FfiConverterTypeQuad_lift(_ buf: RustBuffer) throws -> Quad {
 #endif
 public func FfiConverterTypeQuad_lower(_ value: Quad) -> RustBuffer {
     return FfiConverterTypeQuad.lower(value)
+}
+
+
+public struct ReaderTabs: Equatable, Hashable {
+    public var attachmentIds: [String]
+    public var front: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(attachmentIds: [String], front: String?) {
+        self.attachmentIds = attachmentIds
+        self.front = front
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ReaderTabs: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeReaderTabs: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ReaderTabs {
+        return
+            try ReaderTabs(
+                attachmentIds: FfiConverterSequenceString.read(from: &buf), 
+                front: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ReaderTabs, into buf: inout [UInt8]) {
+        FfiConverterSequenceString.write(value.attachmentIds, into: &buf)
+        FfiConverterOptionString.write(value.front, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeReaderTabs_lift(_ buf: RustBuffer) throws -> ReaderTabs {
+    return try FfiConverterTypeReaderTabs.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeReaderTabs_lower(_ value: ReaderTabs) -> RustBuffer {
+    return FfiConverterTypeReaderTabs.lower(value)
 }
 
 
@@ -4622,6 +4836,30 @@ fileprivate struct FfiConverterOptionTypePageRect: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeReaderTabs: FfiConverterRustBuffer {
+    typealias SwiftType = ReaderTabs?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeReaderTabs.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeReaderTabs.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeWindowState: FfiConverterRustBuffer {
     typealias SwiftType = WindowState?
 
@@ -4860,6 +5098,31 @@ fileprivate struct FfiConverterSequenceTypeItemRow: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeItemRow.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypePdfPageText: FfiConverterRustBuffer {
+    typealias SwiftType = [PdfPageText]
+
+    public static func write(_ value: [PdfPageText], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypePdfPageText.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [PdfPageText] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [PdfPageText]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypePdfPageText.read(from: &buf))
         }
         return seq
     }
@@ -5133,6 +5396,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_paper_ffi_checksum_method_engine_export_bib() != 15945) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_paper_ffi_checksum_method_engine_find_item() != 65031) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_paper_ffi_checksum_method_engine_find_pdf() != 62843) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -5157,7 +5423,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_paper_ffi_checksum_method_engine_note() != 63485) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_paper_ffi_checksum_method_engine_pdf_text() != 2506) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_paper_ffi_checksum_method_engine_pinned_tabs() != 29488) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paper_ffi_checksum_method_engine_reader_tabs() != 5702) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_recent_libraries() != 31624) {
@@ -5182,6 +5454,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_set_pinned_tabs() != 22835) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paper_ffi_checksum_method_engine_set_reader_tabs() != 62321) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paper_ffi_checksum_method_engine_set_reading_position() != 20486) {

@@ -10,9 +10,11 @@
 
 mod import;
 mod pool;
+mod reader;
 mod topics;
 
 use std::collections::HashSet;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,8 +26,8 @@ pub use paper_core::{
     Annotation, AnnotationKind, AnnotationPatch, AttachmentFile, AttachmentRow, CollectionNode,
     Creator, CreatorRole, Figure, FigureSource, Identification, ImportedPdf, ItemDetail,
     ItemFields, ItemKind, ItemQuery, ItemRow, LookupStatus, MAX_RECENT_LIBRARIES, MetadataPatch,
-    NewAnnotation, PagePoint, PageRect, PaperError, PdfStatus, PdfStep, Quad, RECENTLY_ADDED_DAYS,
-    Scope, Settings, SortColumn, SourceRecord, Tag, Topic, WindowState,
+    NewAnnotation, PagePoint, PageRect, PaperError, PdfPageText, PdfStatus, PdfStep, PdfText, Quad,
+    RECENTLY_ADDED_DAYS, Scope, Settings, SortColumn, SourceRecord, Tag, Topic, WindowState,
 };
 use paper_core::{Library, SettingsStore};
 pub use paper_fetch::HttpClient;
@@ -33,6 +35,7 @@ use paper_fetch::{Contact, FetchError, PdfQuery, Resolver, UreqClient};
 pub use paper_ids::Identifier;
 
 use crate::pool::{PoolError, ThreadPool};
+pub use crate::reader::ReaderTabs;
 pub use crate::topics::TopicTags;
 use crate::topics::{JEV_SOURCE, TopicJob};
 
@@ -88,6 +91,10 @@ pub struct EngineOptions {
     /// Do not search for a PDF after a lookup; only `find_pdf` does. Tests
     /// that count requests or events use it.
     pub manual_pdf_search: bool,
+    /// Open the library for reading only, beside the app that may have it
+    /// open, as the MCP server does. Nothing is written: not the library,
+    /// not the recent list, and no citation keys. Every write fails.
+    pub read_only: bool,
 }
 
 /// One open library.
@@ -101,6 +108,9 @@ pub struct Engine {
     undo: UndoBatches,
     pdf_searches: PdfSearches,
     manual_pdf_search: bool,
+    /// Held while the library is open, so other processes can tell the app
+    /// has it open. `None` for a read-only engine.
+    app_lock: Mutex<Option<File>>,
     closed: AtomicBool,
 }
 
@@ -117,7 +127,11 @@ impl Engine {
     }
 
     pub fn open_library_with(path: impl AsRef<Path>, options: EngineOptions) -> Result<Engine> {
-        let library = Library::open(path)?;
+        let library = if options.read_only {
+            Library::open_read_only(path)?
+        } else {
+            Library::open(path)?
+        };
         Engine::start(library, options)
     }
 
@@ -132,17 +146,22 @@ impl Engine {
             None => SettingsStore::default_dir()?,
         };
         let settings = SettingsStore::open(settings_dir);
-        // A read-only config directory must not keep the user out of their library.
-        if let Err(error) = settings.remember_library(library.dir()) {
-            tracing::warn!(%error, "could not add the library to the recent list");
-        }
-        // Libraries from before citation keys get theirs once, here.
-        match library.items_without_citation_key(LookupStatus::Done) {
-            Ok(ids) => {
-                give_citation_keys(&library, &ids);
+        let app_lock = if options.read_only {
+            None
+        } else {
+            // A read-only config directory must not keep the user out of their library.
+            if let Err(error) = settings.remember_library(library.dir()) {
+                tracing::warn!(%error, "could not add the library to the recent list");
             }
-            Err(error) => tracing::warn!(%error, "could not list items without citation keys"),
-        }
+            // Libraries from before citation keys get theirs once, here.
+            match library.items_without_citation_key(LookupStatus::Done) {
+                Ok(ids) => {
+                    give_citation_keys(&library, &ids);
+                }
+                Err(error) => tracing::warn!(%error, "could not list items without citation keys"),
+            }
+            reader::hold_app_lock(library.dir())
+        };
         let http = options.http.unwrap_or_else(|| Arc::new(UreqClient::new()));
         tracing::info!(path = %library.dir().display(), "library opened");
         Ok(Engine {
@@ -154,6 +173,7 @@ impl Engine {
             undo: Arc::new(Mutex::new(Vec::new())),
             pdf_searches: Arc::new(Mutex::new(HashSet::new())),
             manual_pdf_search: options.manual_pdf_search,
+            app_lock: Mutex::new(app_lock),
             closed: AtomicBool::new(false),
         })
     }
@@ -171,6 +191,9 @@ impl Engine {
         let pool = self.pool.lock().unwrap().take();
         drop(pool);
         *self.observer.lock().unwrap() = None;
+        if let Some(lock) = self.app_lock.lock().unwrap().take() {
+            reader::release_app_lock(self.library.dir(), lock);
+        }
         tracing::info!(path = %self.library.dir().display(), "library closed");
     }
 
@@ -190,6 +213,29 @@ impl Engine {
     pub fn item_detail(&self, id: &str) -> Result<ItemDetail> {
         self.ensure_open()?;
         self.library.item(id)
+    }
+
+    /// The live item that `reference` names: its id, its citation key, or
+    /// its DOI or arXiv ID in any form `add_by_identifier` takes.
+    pub fn find_item(&self, reference: &str) -> Result<Option<String>> {
+        self.ensure_open()?;
+        let reference = reference.trim();
+        match self.library.item_row(reference) {
+            Ok(row) => return Ok(Some(row.id)),
+            Err(PaperError::NotFound { .. }) => {}
+            Err(error) => return Err(error),
+        }
+        if let Some(id) = self.library.find_item_by_citation_key(reference)? {
+            return Ok(Some(id));
+        }
+        let Some(identifier) = Identifier::parse(reference) else {
+            return Ok(None);
+        };
+        Ok(self
+            .library
+            .find_item_by_doi(&identifier.doi())?
+            .filter(|found| !found.deleted)
+            .map(|found| found.item_id))
     }
 
     /// Adds a paper by DOI, doi.org URL, or arXiv ID.
@@ -600,6 +646,63 @@ impl Engine {
             Err(PoolError::Closed) => Err(PaperError::Closed),
             Err(PoolError::Panicked(message)) => Err(PaperError::Io { message }),
         }
+    }
+
+    /// The text of an attachment's PDF from `first_page` (0 based) on, page
+    /// by page, up to the page that would take it past `max_chars`
+    /// characters, and always at least one page. Reading the file takes a
+    /// moment, so it runs on an engine thread.
+    pub async fn pdf_text(
+        &self,
+        attachment_id: &str,
+        first_page: u32,
+        max_chars: u32,
+    ) -> Result<PdfText> {
+        self.ensure_open()?;
+        let row = self.library.attachment(attachment_id)?;
+        let path = self.library.attachment_path(&row);
+        let outcome = self
+            .run(move || {
+                let bytes = std::fs::read(&path)?;
+                let file =
+                    paper_identify::PdfFile::open(bytes).map_err(|_| PaperError::NotPdf {
+                        path: path.display().to_string(),
+                    })?;
+                let page_count = file.page_count() as u32;
+                let mut pages = Vec::new();
+                let mut chars = 0;
+                for page_index in first_page..page_count {
+                    let text = file.page_text(page_index as usize);
+                    chars += text.chars().count();
+                    if chars > max_chars as usize && !pages.is_empty() {
+                        break;
+                    }
+                    pages.push(PdfPageText { page_index, text });
+                }
+                Ok(PdfText { page_count, pages })
+            })
+            .await;
+        match outcome {
+            Ok(outcome) => outcome,
+            Err(PoolError::Closed) => Err(PaperError::Closed),
+            Err(PoolError::Panicked(message)) => Err(PaperError::Io { message }),
+        }
+    }
+
+    /// Tells programs beside the app, such as the MCP server, which PDFs the
+    /// reader tabs show. The app calls it whenever its tabs or the tab in
+    /// front change. Closing the engine forgets them.
+    pub fn set_reader_tabs(&self, tabs: ReaderTabs) -> Result<()> {
+        self.ensure_open()?;
+        Ok(reader::write_tabs(self.library.dir(), &tabs)?)
+    }
+
+    /// The reader tabs of the app that has this library open, as it last
+    /// told them with `set_reader_tabs`, or `None` when no app has the
+    /// library open.
+    pub fn reader_tabs(&self) -> Result<Option<ReaderTabs>> {
+        self.ensure_open()?;
+        Ok(reader::read_tabs(self.library.dir()))
     }
 
     /// Remembers the reader's page (0 based) and zoom for an attachment. The
