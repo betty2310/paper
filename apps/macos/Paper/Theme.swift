@@ -536,6 +536,7 @@ enum Theme {
     /// clear glass shows almost nothing, so a bright rim, lit from above as
     /// in Control Center, and a shadow outside the shape draw its edge.
     enum Glass {
+        /// A bright edge lit from above, one physical pixel wide.
         static let rim = LinearGradient(
             stops: [
                 .init(color: SwiftUI.Color.white.opacity(0.85), location: 0),
@@ -543,7 +544,16 @@ enum Theme {
                 .init(color: SwiftUI.Color.white.opacity(0.55), location: 1),
             ],
             startPoint: .top, endPoint: .bottom)
-        static let rimWidth: CGFloat = 1
+        /// The same edge on dark glass. At the light rim's strength it read
+        /// as a white border, so it is as faint as the edge macOS draws
+        /// around dark windows.
+        static let darkRim = LinearGradient(
+            stops: [
+                .init(color: SwiftUI.Color.white.opacity(0.22), location: 0),
+                .init(color: SwiftUI.Color.white.opacity(0.06), location: 0.5),
+                .init(color: SwiftUI.Color.white.opacity(0.12), location: 1),
+            ],
+            startPoint: .top, endPoint: .bottom)
         static let shadowColor = SwiftUI.Color.black.opacity(0.16)
         static let shadowRadius: CGFloat = 6
         static let shadowY: CGFloat = 2

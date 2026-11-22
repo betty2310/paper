@@ -71,6 +71,7 @@ final class ReferenceCardModel: ObservableObject {
 /// entry as printed, and buttons to open the paper on the web or in Paper.
 struct ReferenceCard: View {
     @ObservedObject var model: ReferenceCardModel
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         if let reference = model.reference {
@@ -80,7 +81,7 @@ struct ReferenceCard: View {
                 .modifier(FloatingGlass(shape: RoundedRectangle(cornerRadius: Theme.Size.referenceCardRadius, style: .continuous)) { content, shape in
                     content
                         .background(Theme.Color.swiftUIPanel, in: shape)
-                        .overlay(shape.strokeBorder(Theme.Color.swiftUISeparator, lineWidth: 1))
+                        .overlay(shape.strokeBorder(Theme.Color.swiftUISeparator, lineWidth: 1 / displayScale))
                         .shadow(color: Theme.Markup.shadowColor, radius: Theme.Markup.shadowRadius, y: Theme.Markup.shadowY)
                 })
                 .onHover { model.hovering($0) }

@@ -369,6 +369,9 @@ struct FloatingGlass<S: InsettableShape, Fallback: View>: ViewModifier {
         self.fallback = fallback
     }
 
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.displayScale) private var displayScale
+
     func body(content: Content) -> some View {
         if #available(macOS 26, *) {
             // Regular glass, not clear: in Dark Mode the clear glass's white
@@ -377,7 +380,7 @@ struct FloatingGlass<S: InsettableShape, Fallback: View>: ViewModifier {
             content
                 .background(SwiftUI.Color(nsColor: Theme.Color.floatingGlassTint), in: shape)
                 .glassEffect(.regular.interactive(), in: shape)
-                .overlay(shape.strokeBorder(Theme.Glass.rim, lineWidth: Theme.Glass.rimWidth).allowsHitTesting(false))
+                .overlay(shape.strokeBorder(colorScheme == .dark ? Theme.Glass.darkRim : Theme.Glass.rim, lineWidth: 1 / displayScale).allowsHitTesting(false))
                 .background(GlassShadow(shape: shape))
         } else {
             fallback(AnyView(content), shape)
